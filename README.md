@@ -22,6 +22,6 @@ python build_vocab.py --data-path ../data/en_zh \
 # Example usage of training NMT:
 
 python train_nmt.py --data-path ../data/en_zh \
---save-path ../models/en_zh --num-workers 4 \
+--save-path ../checkpoints/en_zh --num-workers 4 \
 --num-layers 2 --dropout 0.5 --checkpoint 500 --epochs 10 \
 --validate False --bidirectional True
