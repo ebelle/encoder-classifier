@@ -17,7 +17,7 @@ python translation_data_prep.py  --save-path ../data/en_ru \
 
 python build_vocab.py --data-path ../data/en_zh \
 --task translation --source-name src --target-name trg \
---max-vocab-size 60000 
+--max-vocab-size 60000 --source-vectors crawl-300d-2M.vec
 
 # Example usage of training NMT:
 
