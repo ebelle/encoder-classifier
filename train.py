@@ -63,7 +63,6 @@ def train_model(
 
     model.train()
     epoch_loss = 0
-    print(f"len iterator: {len(iterator)}")
     for i, batch in enumerate(iterator):
         source, targets, src_len = prep_batch(batch, device)
         optimizer.zero_grad()
@@ -81,6 +80,7 @@ def train_model(
             )
             del source, targets, src_len
             epoch_loss += loss
+
             # shitty progress bar of sorts
             if i != 0 and i % 200 == 0:
                 end_time = time.time()
