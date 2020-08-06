@@ -56,7 +56,7 @@ def limit_length(src_list, trg_list, max_len=None, min_len=None):
             good_len_trg.append(t[0])
     assert len(good_len_src) == len(good_len_trg)
     print(
-        f"number of examples after removing sequences based on min and/or max length{len(good_len_src)}"
+        f"number of examples after removing sequences based on min and/or max length {len(good_len_src)}"
     )
 
     return good_len_src, good_len_trg

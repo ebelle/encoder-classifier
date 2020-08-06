@@ -105,8 +105,6 @@ def main(args):
             valid_set = LazyDataset(args.data_path, "valid.tsv", SRC, TRG)
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
-            model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
-            torch.save(model.state_dict(), model_filename)
 
             valid_loss = evaluate_nmt_model(
                 model,
@@ -121,11 +119,29 @@ def main(args):
 
             epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
+            model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
+            adam, sparse_adam = optimizer.return_optimizers()
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "adam_state_dict": adam.state_dict(),
+                    "sparse_adam_state_dict": sparse_adam.state_dict(),
+                    "loss": valid_loss,
+                }, model_filename)
+
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
 
                 best_filename = os.path.join(args.save_path, f"best_model.pt")
-                torch.save(model.state_dict(), best_filename)
+                torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "adam_state_dict": adam.state_dict(),
+                    "sparse_adam_state_dict": sparse_adam.state_dict(),
+                    "loss": valid_loss,
+                }, best_filename)
 
             print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
@@ -142,7 +158,15 @@ def main(args):
 
             # save models each epoch
             model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
-            torch.save(model.state_dict(), model_filename)
+            adam, sparse_adam = optimizer.return_optimizers()
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "adam_state_dict": adam.state_dict(),
+                    "sparse_adam_state_dict": sparse_adam.state_dict(),
+                    "loss": valid_loss,
+                }, model_filename)
 
             print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
