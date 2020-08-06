@@ -195,12 +195,14 @@ if __name__ == "__main__":
         "--src-tok",
         default=None,
         type=str,
+        choices=["en", "es", "fr", "ru", "zh"],
         help="source language tokenizer. options are en, es, fr, ru, or zh",
     )
     parser.add_argument(
         "--trg-tok",
         default=None,
         type=str,
+        choices=["en", "es", "fr", "ru", "zh"],
         help="target language tokenizer. options are en, es, fr, ru, or zh",
     )
     main(parser.parse_args())

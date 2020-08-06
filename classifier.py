@@ -54,20 +54,14 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self,
-        enc_hidden_dim,
-        dec_hidden_dim,
-        output_dim,
-        dropout,
-        bidirectional,
-        pad_idx,
+        self, hid_dim, output_dim, dropout, bidirectional, pad_idx,
     ):
         super().__init__()
 
         self.dropout = nn.Dropout(p=dropout)
 
-        self.hidden_layer = nn.Linear(enc_hidden_dim, dec_hidden_dim)
-        self.final_out = nn.Linear(dec_hidden_dim, output_dim)
+        self.hidden_layer = nn.Linear(hid_dim, hid_dim)
+        self.final_out = nn.Linear(hid_dim, output_dim)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, encoder_outputs):
@@ -81,11 +75,32 @@ class Decoder(nn.Module):
 
 
 class Classifier(nn.Module):
-    def __init__(self, encoder, decoder):
+    def __init__(
+        self,
+        new_state_dict,
+        freeze_encoder,
+        input_dim,
+        emb_dim,
+        hid_dim,
+        output_dim,
+        num_layers,
+        dropout,
+        bidirectional,
+        pad_idx,
+    ):
         super().__init__()
 
-        self.encoder = encoder
-        self.decoder = decoder
+        self.encoder = Encoder(
+            input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, pad_idx
+        )
+        # load data from pre-trained encoder
+        self.encoder.load_state_dict(new_state_dict)
+        # optionally freeze encoder
+        if freeze_encoder == True:
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+
+        self.decoder = Decoder(hid_dim, output_dim, dropout, bidirectional, pad_idx)
 
     def forward(self, src, src_len):
 

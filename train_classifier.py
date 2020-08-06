@@ -11,8 +11,8 @@ from torch import optim
 from lazy_dataset import LazyDataset
 from custom_collate import sort_batch
 from classifier import Classifier
-from train import train_cls_model
-from evaluate import evaluate_cls_model
+from train import train_model
+from evaluate import evaluate_model
 from utils import random_init_weights, count_parameters, epoch_time
 from multiple_optim import make_muliti_optim
 
@@ -122,15 +122,16 @@ def main(args):
     # training
     for epoch in range(args.epochs):
         start_time = time.time()
-        train_loss = train_cls_model(
+        train_loss = train_model(
             model,
             train_iterator,
-            optimizer,
-            criterion,
-            args.clip,
-            device,
-            epoch,
-            start_time,
+            task="classification",
+            optimizer=optimizer,
+            criterion=criterion,
+            clip=args.clip,
+            device=device,
+            epoch=epoch,
+            start_time=start_time,
             save_path=args.save_path,
             checkpoint=args.checkpoint,
         )
@@ -141,13 +142,13 @@ def main(args):
             valid_set = LazyDataset(args.data_path, "valid.tsv", SRC, TRG)
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
-            valid_loss = evaluate_cls_model(
+            valid_loss = evaluate_model(
                 model,
                 valid_iterator,
-                optimizer,
-                criterion,
-                args.teacher_forcing,
-                device,
+                optimizer=optimizer,
+                criterion=criterion,
+                task="classification",
+                device=device,
             )
 
             end_time = time.time()

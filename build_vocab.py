@@ -61,7 +61,11 @@ if __name__ == "__main__":
     # hyperparameters
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", help="folder where data is stored")
-    parser.add_argument("--task", help="translation or classification")
+    parser.add_argument(
+        "--task",
+        choices=["translation", "classification"],
+        help="translation or classification",
+    )
     parser.add_argument(
         "--source-name",
         type=str,

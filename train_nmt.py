@@ -9,8 +9,8 @@ import torch.nn as nn
 from lazy_dataset import LazyDataset
 from custom_collate import sort_batch
 from lstm import Seq2Seq
-from train import train_nmt_model
-from evaluate import evaluate_nmt_model
+from train import train_model
+from evaluate import evaluate_model
 from utils import random_init_weights, count_parameters, epoch_time
 from multiple_optim import make_muliti_optim
 
@@ -85,17 +85,18 @@ def main(args):
     # training
     for epoch in range(args.epochs):
         start_time = time.time()
-        train_loss = train_nmt_model(
+        train_loss = train_model(
             model,
             train_iterator,
-            optimizer,
-            criterion,
-            args.clip,
-            args.teacher_forcing,
-            device,
-            epoch,
-            start_time,
+            task="translation",
+            optimizer=optimizer,
+            criterion=criterion,
+            clip=args.clip,
+            device=device,
+            epoch=epoch,
+            start_time=start_time,
             save_path=args.save_path,
+            teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
         )
 
@@ -105,14 +106,14 @@ def main(args):
             valid_set = LazyDataset(args.data_path, "valid.tsv", SRC, TRG)
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
-
-            valid_loss = evaluate_nmt_model(
+            valid_loss = evaluate_model(
                 model,
                 valid_iterator,
-                optimizer,
-                criterion,
-                args.teacher_forcing,
-                device,
+                task="translation",
+                optimizer=optimizer,
+                criterion=criterion,
+                teacher_forcing=args.teacher_forcing,
+                device=device,
             )
 
             end_time = time.time()
@@ -128,20 +129,24 @@ def main(args):
                     "adam_state_dict": adam.state_dict(),
                     "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": valid_loss,
-                }, model_filename)
+                },
+                model_filename,
+            )
 
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
 
                 best_filename = os.path.join(args.save_path, f"best_model.pt")
                 torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "adam_state_dict": adam.state_dict(),
-                    "sparse_adam_state_dict": sparse_adam.state_dict(),
-                    "loss": valid_loss,
-                }, best_filename)
+                    {
+                        "epoch": epoch,
+                        "model_state_dict": model.state_dict(),
+                        "adam_state_dict": adam.state_dict(),
+                        "sparse_adam_state_dict": sparse_adam.state_dict(),
+                        "loss": valid_loss,
+                    },
+                    best_filename,
+                )
 
             print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
@@ -166,7 +171,9 @@ def main(args):
                     "adam_state_dict": adam.state_dict(),
                     "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": valid_loss,
-                }, model_filename)
+                },
+                model_filename,
+            )
 
             print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(

@@ -4,14 +4,25 @@ import torch
 from utils import prep_batch, epoch_time
 
 
-def train_nmt_step(
-    model, source, src_len, targets, criterion, optimizer, clip, teacher_forcing,
+def train_step(
+    model,
+    source,
+    src_len,
+    targets,
+    task,
+    criterion,
+    optimizer,
+    clip,
+    teacher_forcing=None,
 ):
     # source = [src_len, bsz]
     # targets = [trg_len, bsz]
     # src_len = [bsz]
 
-    output = model(source, src_len, targets, teacher_forcing)
+    if task == "translation":
+        output = model(source, src_len, targets, teacher_forcing)
+    elif task == "classification":
+        output = model(source, src_len, targets)
     # output = [src_len, bsz, output dim]
 
     output_dim = output.shape[-1]
@@ -35,17 +46,18 @@ def train_nmt_step(
     return loss
 
 
-def train_nmt_model(
+def train_model(
     model,
     iterator,
+    task,
     optimizer,
     criterion,
     clip,
-    teacher_forcing,
     device,
     epoch,
     start_time,
     save_path,
+    teacher_forcing=None,
     checkpoint=None,
 ):
 
@@ -56,11 +68,12 @@ def train_nmt_model(
         source, targets, src_len = prep_batch(batch, device)
         optimizer.zero_grad()
         try:
-            loss = train_nmt_step(
+            loss = train_step(
                 model,
                 source,
                 src_len,
                 targets,
+                task,
                 criterion,
                 optimizer,
                 clip,
