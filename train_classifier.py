@@ -45,7 +45,6 @@ def get_prev_params(prev_state_dict):
         else:
             bidirectional = False
 
-
     # determine number of layers in previous model
     for k in prev_state_dict.keys():
         if "l1" in k:
@@ -84,7 +83,7 @@ def main(args):
     }
 
     # create lazydataset and data loader
-    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG)
+    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG, "classification")
     train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
 
     # load pretrained-model
@@ -104,7 +103,7 @@ def main(args):
         num_layers,
         args.dropout,
         bidirectional,
-        pad_idx
+        pad_idx,
     ).to(device)
 
     # optionally randomly initialize weights
@@ -140,7 +139,9 @@ def main(args):
         # optionally validate
         if args.validate == True:
 
-            valid_set = LazyDataset(args.data_path, "valid.tsv", SRC, TRG)
+            valid_set = LazyDataset(
+                args.data_path, "valid.tsv", SRC, TRG, "classification"
+            )
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
             valid_loss = evaluate_model(

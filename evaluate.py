@@ -11,7 +11,7 @@ def valid_step(
     if task == "translation":
         output = model(source, src_len, targets, teacher_forcing)
     elif task == "classification":
-        output = model(source, src_len, targets)
+        output = model(source, src_len)
 
     # trg = [trg_len, bsz]
     # output = [src_len, bsz, output dim]

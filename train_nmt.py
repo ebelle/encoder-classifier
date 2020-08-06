@@ -42,7 +42,7 @@ def main(args):
     }
 
     # create lazydataset and data loader
-    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG)
+    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG, "translation")
     train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
 
     # create model
@@ -103,7 +103,9 @@ def main(args):
         # optionally validate
         if args.validate == True:
 
-            valid_set = LazyDataset(args.data_path, "valid.tsv", SRC, TRG)
+            valid_set = LazyDataset(
+                args.data_path, "valid.tsv", SRC, TRG, "translation"
+            )
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
             valid_loss = evaluate_model(

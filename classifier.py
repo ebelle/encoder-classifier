@@ -49,7 +49,7 @@ class Encoder(nn.Module):
             x = x[:, :, : self.hid_dim] + x[:, :, self.hid_dim :]
 
         # hidden = [n layers * num directions, batch size, hid dim]
-        return x, hidden, cell
+        return x
 
 
 class Decoder(nn.Module):

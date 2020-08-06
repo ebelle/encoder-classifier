@@ -22,7 +22,7 @@ def train_step(
     if task == "translation":
         output = model(source, src_len, targets, teacher_forcing)
     elif task == "classification":
-        output = model(source, src_len, targets)
+        output = model(source, src_len)
     # output = [src_len, bsz, output dim]
 
     output_dim = output.shape[-1]
@@ -102,7 +102,7 @@ def train_model(
                             "sparse_adam_state_dict": sparse_adam.state_dict(),
                             "loss": loss,
                         },
-                        os.path.join(save_path, f"checkpoint_{epoch}_{batch}.pt"),
+                        os.path.join(save_path, f"checkpoint_{epoch}_{i}.pt"),
                     )
                     print(
                         f"Checkpoint saved at epoch {epoch} batch {i}. Train loss is {loss:.3f}"
