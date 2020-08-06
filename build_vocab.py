@@ -16,6 +16,19 @@ def load_train_data(SRC, TRG, data_path, source, target):
     )
     return train_data
 
+def load_data(SRC, TRG, data_path, source, target):
+    data_fields = [(source, SRC), (target, TRG)]
+    data = TabularDataset.splits(
+        path=data_path,
+        train='train.tsv',
+        validation='valid.tsv', 
+        test='test.tsv',
+        format="tsv",
+        fields=data_fields,
+        skip_header=True,
+    )
+    return data
+
 
 # TODO: add in target vectors option
 def main(args):
@@ -48,10 +61,12 @@ def main(args):
         SRC = Field()
         TRG = Field(unk_token=None)
 
-        train_data = load_train_data(SRC, TRG, args.data_path, args.source, args.target)
+        train,valid,test = load_data(
+            SRC, TRG, args.data_path, args.source_name, args.target_name
+        )
 
         # uses source vocab from translation task so we only build target vocab
-        TRG.build_vocab(train_data)
+        TRG.build_vocab(train,valid,test)
         torch.save(TRG, os.path.join(args.data_path, "trg_vocab.pt"))
         print(f"Unique tokens in target vocabulary: {len(TRG.vocab)}")
         return TRG

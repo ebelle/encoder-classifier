@@ -34,22 +34,23 @@ def get_prev_params(prev_state_dict):
     # gather parameters from pre-trained model
 
     emb_dim = prev_state_dict["encoder.enc_embedding.weight"].shape[1]
-    hid_dim = prev_state_dict["encoder.enc_embedding.weight"].shape[1]
+    hid_dim = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[1]
 
     # determine if previous model was bidirectional
     # if so, halve the hid_dim so it matches the previous model
     for k in prev_state_dict.keys():
         if "reverse" in k:
             bidirectional = True
+            break
         else:
             bidirectional = False
-    if bidirectional == True:
-        hid_dim = hid_dim / 2
+
 
     # determine number of layers in previous model
     for k in prev_state_dict.keys():
         if "l1" in k:
             num_layers = 2
+            break
         else:
             num_layers = 1
 
@@ -65,8 +66,8 @@ def main(args):
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
 
-    SRC = torch.load(os.path.join(args.translation_data_path, "src_vocab.pt"))
-    TRG = torch.load(os.path.join(args.classifier_data_path, "trg_vocab.pt"))
+    SRC = torch.load(os.path.join(args.source_vocab_path, "src_vocab.pt"))
+    TRG = torch.load(os.path.join(args.data_path, "trg_vocab.pt"))
 
     # gather parameters from the vocabulary
     input_dim = len(SRC.vocab)
@@ -103,7 +104,7 @@ def main(args):
         num_layers,
         args.dropout,
         bidirectional,
-        pad_idx,
+        pad_idx
     ).to(device)
 
     # optionally randomly initialize weights
