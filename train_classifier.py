@@ -9,12 +9,10 @@ import torch.nn as nn
 from torch import optim
 
 from lazy_dataset import LazyDataset
-from custom_collate import sort_batch
 from classifier import Classifier
 from train import train_model
 from evaluate import evaluate_model
-from utils import random_init_weights, count_parameters, epoch_time
-from multiple_optim import make_muliti_optim
+from utils import random_init_weights, count_parameters, epoch_time, sort_batch
 
 
 def new_encoder_dict(prev_state_dict):
@@ -58,6 +56,8 @@ def get_prev_params(prev_state_dict):
 
 def main(args):
 
+    print(args.validate)
+    print(args.dropout)
     # use cuda if available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -99,6 +99,7 @@ def main(args):
         input_dim,
         emb_dim,
         hid_dim,
+        args.dec_hid_dim,
         output_dim,
         num_layers,
         args.dropout,
@@ -138,7 +139,6 @@ def main(args):
 
         # optionally validate
         if args.validate == True:
-
             valid_set = LazyDataset(
                 args.data_path, "valid.tsv", SRC, TRG, "classification"
             )
@@ -226,10 +226,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save-path", help="folder for saving model and/or checkpoints"
     )
+    parser.add_argument(
+        "--validate", default=False, type=bool, help="set to False to skip validation"
+    )
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument("--shuffle-batch", default=True, type=bool)
+    parser.add_argument(
+        "--classifier-hid-dim",
+        default=512,
+        type=int,
+        help="hidden dimension for classifier",
+    )
     parser.add_argument("--dropout", default=0.1, type=float)
     parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
@@ -245,8 +254,5 @@ if __name__ == "__main__":
         "--learning-rate", type=float, default=1e-3, help="learning rate for optimizer"
     )
     parser.add_argument("--checkpoint", type=int, help="save model every N batches")
-    parser.add_argument(
-        "--validate", default=True, type=bool, help="set to False to skip validation"
-    )
 
     main(parser.parse_args())

@@ -23,11 +23,9 @@ def valid_step(
 
     # trg = [(trg len - 1) * bsz]
     # output = [(trg len - 1) * bsz, output dim]
-    loss = criterion(output, targets)
-    # extract the loss value but don't hold the tensors in memory
-    loss = loss.item()
 
-    return loss
+    # return loss
+    return criterion(output, targets).item()
 
 
 def evaluate_model(

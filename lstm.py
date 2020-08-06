@@ -54,29 +54,30 @@ class Encoder(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, hid_dim, dropout):
+    def __init__(self, hid_dim, dropout, bidirectional):
         super().__init__()
 
         self.hid_dim = hid_dim
-        self.fc = nn.Linear(hid_dim * 2, hid_dim)
+        self.bidirectional = bidirectional
+        self.fc = nn.Linear(hid_dim * 2 if self.bidirectional else hid_dim, hid_dim)
         self.dropout = nn.Dropout(dropout)
 
     def dot_score(self, hidden_state, encoder_states):
         return torch.sum(hidden_state * encoder_states, dim=2)
 
     def forward(self, hidden, encoder_outputs, mask):
-        hidden = torch.tanh(
-            self.dropout(
-                self.fc(torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1))
-            )
-        )
+
+        if self.bidirectional == True:
+            hidden = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
+
+        hidden = torch.tanh(self.dropout(self.fc(hidden)))
 
         hidden = hidden.unsqueeze(0)
 
         attn = self.dot_score(hidden, encoder_outputs)
         del (hidden, encoder_outputs)
         # Transpose max_length and batch_size dimensions
-        attn = attn.t()
+        attn.t()
         # Apply mask so network does not attend <pad> tokens
         attn = attn.masked_fill(mask == 0, -1e10)
         # Softmax over attention scores
@@ -110,8 +111,10 @@ class Decoder(nn.Module):
             dropout=dropout if num_layers > 1 else 0,
             bidirectional=bidirectional,
         )
-
-        self.fc_out = nn.Linear(hid_dim * 2, output_dim)
+        self.bidirectional = bidirectional
+        self.fc_out = nn.Linear(
+            hid_dim * 2 if self.bidirectional else hid_dim, output_dim
+        )
 
         self.dropout = nn.Dropout(dropout)
 
@@ -132,7 +135,10 @@ class Decoder(nn.Module):
         attn = self.attention(hidden, encoder_outputs, mask)
         attn = attn.bmm(encoder_outputs.transpose(0, 1))  # B x 1 x N
 
-        word_input = word_input[:, :, : self.hid_dim] + word_input[:, :, self.hid_dim :]
+        if self.bidirectional == True:
+            word_input = (
+                word_input[:, :, : self.hid_dim] + word_input[:, :, self.hid_dim :]
+            )
 
         # Final output layer (next word prediction) using the RNN hidden state and context vector
         word_input = word_input.squeeze(0)  # S=1 x B x N -> B x N
@@ -163,7 +169,7 @@ class Seq2Seq(nn.Module):
         self.encoder = Encoder(
             input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, src_pad_idx
         )
-        self.attention = Attention(hid_dim, dropout)
+        self.attention = Attention(hid_dim, dropout, bidirectional)
         self.decoder = Decoder(
             output_dim,
             emb_dim,
