@@ -40,12 +40,11 @@ class LazyDataset(Dataset):
 
     def __getitem__(self, index):
         "Generates one sample of data"
-        # skip header
-        if index != 0:
-            line = linecache.getline(self._filepath, index + 1)
-            text, target = line.split("\t")
-            # string to list, tokenizing on white space
-            text, target = text.split(), target.split()
-            text, target = self.tokens_to_idx(text, target)
-            text_lens = len(text)
-            return text, target, text_lens
+
+        line = linecache.getline(self._filepath, index + 1)
+        text, target = line.split("\t")
+        # string to list, tokenizing on white space
+        text, target = text.split(), target.split()
+        text, target = self.tokens_to_idx(text, target)
+        text_lens = len(text)
+        return text, target, text_lens
