@@ -57,6 +57,7 @@ def train_model(
     epoch,
     start_time,
     save_path,
+    dropout,
     teacher_forcing=None,
     checkpoint=None,
 ):
@@ -66,22 +67,23 @@ def train_model(
     for i, batch in enumerate(iterator):
         source, targets, src_len = prep_batch(batch, device)
         optimizer.zero_grad()
-        try:
-            loss = train_step(
-                model,
-                source,
-                src_len,
-                targets,
-                task,
-                criterion,
-                optimizer,
-                clip,
-                teacher_forcing,
-            )
-            del source, targets, src_len
-            epoch_loss += loss
+        #try:
+        loss = train_step(
+            model,
+            source,
+            src_len,
+            targets,
+            task,
+            criterion,
+            optimizer,
+            clip,
+            teacher_forcing,
+        )
+        del source, targets, src_len
+        epoch_loss += loss
 
-            # shitty progress bar of sorts
+        # shitty progress bar of sorts
+        try:
             if i != 0 and i % 200 == 0:
                 end_time = time.time()
 
@@ -101,12 +103,13 @@ def train_model(
                             "adam_state_dict": adam.state_dict(),
                             "sparse_adam_state_dict": sparse_adam.state_dict(),
                             "loss": loss,
+                            "dropout": dropout,
                         },
                         os.path.join(save_path, f"checkpoint_{epoch}_{i}.pt"),
                     )
                     print(
                         f"Checkpoint saved at epoch {epoch} batch {i}. Train loss is {loss:.3f}"
-                    )
+                        )
         # skip batch in case of OOM
         except RuntimeError as e:
             if "out of memory" in str(e):

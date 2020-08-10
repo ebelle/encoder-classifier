@@ -67,17 +67,15 @@ class Attention(nn.Module):
 
     def forward(self, hidden, encoder_outputs, mask):
 
-        if self.bidirectional == True:
+        if self.bidirectional:
             hidden = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
-
+            hidden = hidden.unsqueeze(0)
         hidden = torch.tanh(self.dropout(self.fc(hidden)))
-
-        hidden = hidden.unsqueeze(0)
 
         attn = self.dot_score(hidden, encoder_outputs)
         del (hidden, encoder_outputs)
         # Transpose max_length and batch_size dimensions
-        attn.t()
+        attn.t_()
         # Apply mask so network does not attend <pad> tokens
         attn = attn.masked_fill(mask == 0, -1e10)
         # Softmax over attention scores
@@ -112,9 +110,7 @@ class Decoder(nn.Module):
             bidirectional=bidirectional,
         )
         self.bidirectional = bidirectional
-        self.fc_out = nn.Linear(
-            hid_dim * 2 if self.bidirectional else hid_dim, output_dim
-        )
+        self.fc_out = nn.Linear(hid_dim * 2, output_dim)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -143,7 +139,6 @@ class Decoder(nn.Module):
         # Final output layer (next word prediction) using the RNN hidden state and context vector
         word_input = word_input.squeeze(0)  # S=1 x B x N -> B x N
         attn = attn.squeeze(1)  # B x S=1 x N -> B x N
-
         word_input = F.log_softmax(
             self.fc_out(torch.cat((word_input, attn), dim=1)), dim=1
         )

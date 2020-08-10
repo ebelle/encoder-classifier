@@ -7,12 +7,10 @@ import torch
 import torch.nn as nn
 
 from lazy_dataset import LazyDataset
-from custom_collate import sort_batch
 from lstm import Seq2Seq
 from train import train_model
 from evaluate import evaluate_model
-from utils import random_init_weights, count_parameters, epoch_time
-from multiple_optim import make_muliti_optim
+from utils import *
 
 
 def main(args):
@@ -83,7 +81,7 @@ def main(args):
     best_valid_loss = float("inf")
 
     # training
-    for epoch in range(args.epochs):
+    for epoch in range(1,args.epochs+1):
         start_time = time.time()
         train_loss = train_model(
             model,
@@ -96,13 +94,14 @@ def main(args):
             epoch=epoch,
             start_time=start_time,
             save_path=args.save_path,
+            dropout=args.dropout,
             teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
         )
 
         # optionally validate
-        if args.validate == True:
-
+        if not args.skip_validate:
+            
             valid_set = LazyDataset(
                 args.data_path, "valid.tsv", SRC, TRG, "translation"
             )
@@ -131,6 +130,7 @@ def main(args):
                     "adam_state_dict": adam.state_dict(),
                     "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": valid_loss,
+                    "dropout": args.dropout,
                 },
                 model_filename,
             )
@@ -146,11 +146,13 @@ def main(args):
                         "adam_state_dict": adam.state_dict(),
                         "sparse_adam_state_dict": sparse_adam.state_dict(),
                         "loss": valid_loss,
+                        "dropout": args.dropout,
+
                     },
                     best_filename,
                 )
 
-            print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
+            print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
@@ -172,19 +174,20 @@ def main(args):
                     "model_state_dict": model.state_dict(),
                     "adam_state_dict": adam.state_dict(),
                     "sparse_adam_state_dict": sparse_adam.state_dict(),
-                    "loss": valid_loss,
+                    "loss": train_loss,
+                    "dropout": args.dropout,
+
                 },
                 model_filename,
             )
 
-            print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
+            print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
 
 
 if __name__ == "__main__":
-    # hyperparameters
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data-path", help="folder where data and dictionaries are stored"
@@ -195,28 +198,28 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--shuffle-batch", default=True, type=bool)
+    parser.add_argument("--shuffle-batch", default=False,action='store_true')
+    parser.add_argument(
+        "--random-init", default=False,action='store_true', help="randomly initialize weights"
+    )
     parser.add_argument("--embedding-dim", default=300, type=int)
     parser.add_argument("--hidden-size", default=512, type=int)
     parser.add_argument("--num-layers", default=1, type=int)
     parser.add_argument("--dropout", default=0.1, type=float)
-    parser.add_argument("--bidirectional", default=False, type=bool)
+    parser.add_argument("--bidirectional", default=False, action='store_true')
     parser.add_argument("--teacher-forcing", default=0.5, type=float)
     parser.add_argument("--clip", default=1.0, type=float)
-    parser.add_argument(
-        "--random-init", default=True, type=bool, help="randomly initialize weights"
-    )
     parser.add_argument(
         "--learning-rate", type=float, default=1e-3, help="learning rate for optimizer"
     )
     parser.add_argument("--checkpoint", type=int, help="save model every N batches")
     parser.add_argument(
-        "--validate", default=True, type=bool, help="set to False to skip validation"
+        "--skip-validate", default=False,action='store_true', help="set to False to skip validation"
     )
     parser.add_argument(
         "--freeze-embeddings",
         default=False,
-        type=bool,
+        action='store_true',
         help="freeze source embedding layer",
     )
     main(parser.parse_args())

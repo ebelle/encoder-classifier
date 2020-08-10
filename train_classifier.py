@@ -12,7 +12,7 @@ from lazy_dataset import LazyDataset
 from classifier import Classifier
 from train import train_model
 from evaluate import evaluate_model
-from utils import random_init_weights, count_parameters, epoch_time, sort_batch
+from utils import random_init_weights, count_parameters, epoch_time, sort_batch, get_prev_params
 
 
 def new_encoder_dict(prev_state_dict):
@@ -28,36 +28,9 @@ def new_encoder_dict(prev_state_dict):
     return new_state_dict
 
 
-def get_prev_params(prev_state_dict):
-    # gather parameters from pre-trained model
-
-    emb_dim = prev_state_dict["encoder.enc_embedding.weight"].shape[1]
-    hid_dim = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[1]
-
-    # determine if previous model was bidirectional
-    # if so, halve the hid_dim so it matches the previous model
-    for k in prev_state_dict.keys():
-        if "reverse" in k:
-            bidirectional = True
-            break
-        else:
-            bidirectional = False
-
-    # determine number of layers in previous model
-    for k in prev_state_dict.keys():
-        if "l1" in k:
-            num_layers = 2
-            break
-        else:
-            num_layers = 1
-
-    return emb_dim, hid_dim, bidirectional, num_layers
-
 
 def main(args):
 
-    print(args.validate)
-    print(args.dropout)
     # use cuda if available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -88,6 +61,11 @@ def main(args):
 
     # load pretrained-model
     prev_state_dict = torch.load(args.model_path)["model_state_dict"]
+    try:
+        prev_dropout = torch.load(args.model_path)["dropout"]
+    # TODO: Remove this before final version
+    except:
+        prev_dropout = 0.5
 
     emb_dim, hid_dim, bidirectional, num_layers = get_prev_params(prev_state_dict)
 
@@ -102,7 +80,7 @@ def main(args):
         args.dec_hid_dim,
         output_dim,
         num_layers,
-        args.dropout,
+        prev_dropout,
         bidirectional,
         pad_idx,
     ).to(device)
@@ -121,7 +99,7 @@ def main(args):
     best_valid_loss = float("inf")
 
     # training
-    for epoch in range(args.epochs):
+    for epoch in range(1,args.epochs+1):
         start_time = time.time()
         train_loss = train_model(
             model,
@@ -133,6 +111,7 @@ def main(args):
             device=device,
             epoch=epoch,
             start_time=start_time,
+            dropout=prev_dropout,
             save_path=args.save_path,
             checkpoint=args.checkpoint,
         )
@@ -164,6 +143,7 @@ def main(args):
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": valid_loss,
+                    "dropout": prev_dropout,
                 },
                 model_filename,
             )
@@ -178,11 +158,13 @@ def main(args):
                         "model_state_dict": model.state_dict(),
                         "optimizer_state_dict": optimizer.state_dict(),
                         "loss": valid_loss,
+                        "dropout": prev_dropout,
+
                     },
                     best_filename,
                 )
 
-            print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
+            print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
@@ -203,11 +185,12 @@ def main(args):
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": valid_loss,
+                    "dropout": prev_dropout,
                 },
                 model_filename,
             )
 
-            print(f"Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s")
+            print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
@@ -227,28 +210,27 @@ if __name__ == "__main__":
         "--save-path", help="folder for saving model and/or checkpoints"
     )
     parser.add_argument(
-        "--validate", default=False, type=bool, help="set to False to skip validation"
+        "--skip-validate", default=False,action='store_true', help="set to False to skip validation"
     )
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--shuffle-batch", default=True, type=bool)
     parser.add_argument(
         "--classifier-hid-dim",
         default=512,
         type=int,
         help="hidden dimension for classifier",
     )
-    parser.add_argument("--dropout", default=0.1, type=float)
     parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
         "--freeze-encoder",
         default=False,
-        type=bool,
+        action='store_true',
         help="optionally freeze encoder so it does not train",
     )
+    parser.add_argument("--shuffle-batch", default=False,action='store_true')
     parser.add_argument(
-        "--random-init", default=True, type=bool, help="randomly initialize weights"
+        "--random-init", default=False,action='store_true', help="randomly initialize weights"
     )
     parser.add_argument(
         "--learning-rate", type=float, default=1e-3, help="learning rate for optimizer"

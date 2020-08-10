@@ -40,8 +40,6 @@ def evaluate_model(
         loss = valid_step(
             model, source, src_len, targets, task, criterion, teacher_forcing
         )
-        # clear the memory before the most memory intensive step
-        torch.cuda.empty_cache()
         epoch_loss += loss
 
     return epoch_loss / len(iterator)
