@@ -92,12 +92,11 @@ class Decoder(nn.Module):
         num_layers,
         dropout,
         bidirectional,
-        attention,
     ):
         super().__init__()
 
         self.output_dim = output_dim
-        self.attention = attention
+        self.attention = Attention(hid_dim, dropout, bidirectional)
         self.hid_dim = hid_dim
 
         self.dec_embedding = nn.Embedding(output_dim, emb_dim, sparse=True)
@@ -164,7 +163,7 @@ class Seq2Seq(nn.Module):
         self.encoder = Encoder(
             input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, src_pad_idx
         )
-        self.attention = Attention(hid_dim, dropout, bidirectional)
+        
         self.decoder = Decoder(
             output_dim,
             emb_dim,
@@ -172,7 +171,6 @@ class Seq2Seq(nn.Module):
             num_layers,
             dropout,
             bidirectional,
-            self.attention,
         )
         self.src_pad_idx = src_pad_idx
         self.device = device

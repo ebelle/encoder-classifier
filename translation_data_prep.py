@@ -68,9 +68,9 @@ def prep_data_files(
     save_path,
     src_tok,
     trg_tok,
-    max_len=None,
-    min_len=None,
-    lower=False,
+    max_len,
+    min_len,
+    lower,
 ):
     X = []
     y = []
@@ -115,7 +115,8 @@ def split_to_tsv(split, X, y, save_path):
     target = [linecache.getline(trg, i).strip() for i in y]
     with open(os.path.join(save_path, f"{split}.tsv"), "w") as sink:
         csv_writer = csv.writer(sink, delimiter="\t")
-        csv_writer.writerow(fields)
+        if split == 'train':
+            csv_writer.writerow(fields)
         csv_writer.writerows(zip(source, target))
 
 
@@ -158,9 +159,9 @@ def main(args):
         args.save_path,
         src_tok=src_tokenizer,
         trg_tok=trg_tokenizer,
-        max_len=55,
-        min_len=5,
-        lower=True,
+        max_len=args.max_len,
+        min_len=args.min_len,
+        lower=args.lower,
     )
 
     X_train, X, y_train, y = train_test_split(X, y, test_size=0.3, random_state=42)
@@ -185,6 +186,7 @@ if __name__ == "__main__":
     parser.add_argument("--src-file", type=str, help="filename of source language file")
     parser.add_argument("--trg-file", type=str, help="filename of source language file")
     parser.add_argument("--save-path", help="folder for saving train,test,valid files")
+    parser.add_argument("--lower",default=False,action='store_true', help="casefold data")
     parser.add_argument(
         "--max-len", default=None, type=int, help="maximum sequence length"
     )

@@ -5,6 +5,7 @@ import argparse
 
 import torch
 import torch.nn as nn
+from torch import optim
 
 from lazy_dataset import LazyDataset
 from lstm import Seq2Seq
@@ -74,14 +75,31 @@ def main(args):
     print(model)
     print(f"The model has {count_parameters(model):,} trainable parameters")
 
-    optimizer = make_muliti_optim(model.named_parameters())
+    if args.continue_training_model:
+        model_dict = torch.load(args.continue_training_model)
+        start_epoch = model_dict["epoch"]
+        model_state_dict = model_dict["model_state_dict"]
+        adam_state_dict = model_dict["adam_state_dict"]
+        sparse_adam_state_dict = model_dict["sparse_adam_state_dict"]
+        optimizer = make_muliti_optim(
+            model.named_parameters(),
+            args.learning_rate,
+            adam_state_dict,
+            sparse_adam_state_dict,
+        )
+        model.load_state_dict(model_state_dict)
+        del model_dict,model_state_dict,adam_state_dict,sparse_adam_state_dict
+    else:
+        start_epoch = 1
+        optimizer = make_muliti_optim(model.named_parameters(), args.learning_rate)
+
     TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
 
     best_valid_loss = float("inf")
 
     # training
-    for epoch in range(1,args.epochs+1):
+    for epoch in range(start_epoch, args.epochs + 1):
         start_time = time.time()
         train_loss = train_model(
             model,
@@ -101,7 +119,7 @@ def main(args):
 
         # optionally validate
         if not args.skip_validate:
-            
+
             valid_set = LazyDataset(
                 args.data_path, "valid.tsv", SRC, TRG, "translation"
             )
@@ -147,7 +165,6 @@ def main(args):
                         "sparse_adam_state_dict": sparse_adam.state_dict(),
                         "loss": valid_loss,
                         "dropout": args.dropout,
-
                     },
                     best_filename,
                 )
@@ -176,7 +193,6 @@ def main(args):
                     "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": train_loss,
                     "dropout": args.dropout,
-
                 },
                 model_filename,
             )
@@ -198,15 +214,18 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--shuffle-batch", default=False,action='store_true')
+    parser.add_argument("--shuffle-batch", default=False, action="store_true")
     parser.add_argument(
-        "--random-init", default=False,action='store_true', help="randomly initialize weights"
+        "--random-init",
+        default=False,
+        action="store_true",
+        help="randomly initialize weights",
     )
     parser.add_argument("--embedding-dim", default=300, type=int)
     parser.add_argument("--hidden-size", default=512, type=int)
     parser.add_argument("--num-layers", default=1, type=int)
     parser.add_argument("--dropout", default=0.1, type=float)
-    parser.add_argument("--bidirectional", default=False, action='store_true')
+    parser.add_argument("--bidirectional", default=False, action="store_true")
     parser.add_argument("--teacher-forcing", default=0.5, type=float)
     parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
@@ -214,12 +233,21 @@ if __name__ == "__main__":
     )
     parser.add_argument("--checkpoint", type=int, help="save model every N batches")
     parser.add_argument(
-        "--skip-validate", default=False,action='store_true', help="set to False to skip validation"
+        "--skip-validate",
+        default=False,
+        action="store_true",
+        help="set to False to skip validation",
     )
     parser.add_argument(
         "--freeze-embeddings",
         default=False,
-        action='store_true',
+        action="store_true",
         help="freeze source embedding layer",
+    )
+    parser.add_argument(
+        "--continue-training-model",
+        default=None,
+        type=str,
+        help="model for restarting training from a saved checkpoint",
     )
     main(parser.parse_args())

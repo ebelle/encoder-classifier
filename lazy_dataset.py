@@ -17,9 +17,10 @@ class LazyDataset(Dataset):
         self.target_eos = self.target_vocab.eos_token
         self._filepath = os.path.join(data_path, filename)
         # get total file length
-        self._total_data = int(
-            subprocess.check_output("wc -l " + self._filepath, shell=True).split()[0]
-        )
+        #self._total_data = int(
+        #    subprocess.check_output("wc -l " + self._filepath, shell=True).split()[0]
+        #)
+        self._total_data = sum(1 for _ in open(self._filepath, "r"))
         self.task = task
 
     def __len__(self):
@@ -40,7 +41,6 @@ class LazyDataset(Dataset):
 
     def __getitem__(self, index):
         "Generates one sample of data"
-
         line = linecache.getline(self._filepath, index + 1)
         text, target = line.split("\t")
         # string to list, tokenizing on white space

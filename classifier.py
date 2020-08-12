@@ -10,7 +10,7 @@ class Encoder(nn.Module):
         emb_dim,
         enc_hid_dim,
         num_layers,
-        dropout,
+        enc_dropout,
         bidirectional,
         pad_idx,
     ):
@@ -30,11 +30,11 @@ class Encoder(nn.Module):
             emb_dim,
             enc_hid_dim,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0,
+            dropout=enc_dropout if num_layers > 1 else 0,
             bidirectional=bidirectional,
         )
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(enc_dropout)
 
     def forward(self, x, input_lengths):
         # Convert input_sequence to embeddings
@@ -61,11 +61,11 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self, enc_hid_dim, dec_hid_dim, output_dim, dropout, bidirectional, pad_idx,
+        self, enc_hid_dim, dec_hid_dim, output_dim, dec_dropout, bidirectional, pad_idx,
     ):
         super().__init__()
 
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(dec_dropout)
 
         self.hidden_layer = nn.Linear(enc_hid_dim, dec_hid_dim)
         self.final_out = nn.Linear(dec_hid_dim, output_dim)
@@ -92,14 +92,15 @@ class Classifier(nn.Module):
         dec_hid_dim,
         output_dim,
         num_layers,
-        dropout,
+        enc_dropout,
+        dec_dropout,
         bidirectional,
         pad_idx,
     ):
         super().__init__()
 
         self.encoder = Encoder(
-            input_dim, emb_dim, enc_hid_dim, num_layers, dropout, bidirectional, pad_idx
+            input_dim, emb_dim, enc_hid_dim, num_layers, enc_dropout, bidirectional, pad_idx
         )
         # load data from pre-trained encoder
         self.encoder.load_state_dict(new_state_dict)
@@ -109,7 +110,7 @@ class Classifier(nn.Module):
                 param.requires_grad = False
 
         self.decoder = Decoder(
-            enc_hid_dim, dec_hid_dim, output_dim, dropout, bidirectional, pad_idx
+            enc_hid_dim, dec_hid_dim, output_dim, dec_dropout, bidirectional, pad_idx
         )
 
     def forward(self, src, src_len):

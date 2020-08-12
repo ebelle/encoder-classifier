@@ -41,7 +41,7 @@ def train_step(
     torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
     optimizer.step()
 
-    # extract the loss value but don't hold the tensors in memory
+    # overwrite the loss item to reduce memory usage
     loss = loss.item()
     return loss
 
@@ -84,7 +84,7 @@ def train_model(
 
         # shitty progress bar of sorts
         try:
-            if i != 0 and i % 200 == 0:
+            if i != 0 and i % checkpoint == 0:
                 end_time = time.time()
 
                 batch_mins, batch_secs = epoch_time(start_time, end_time)

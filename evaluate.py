@@ -3,6 +3,7 @@ import os
 import gc
 from utils import prep_batch
 
+from torchnlp.metrics import get_moses_multi_bleu
 
 def valid_step(
     model, source, src_len, targets, task, criterion, teacher_forcing,
@@ -43,3 +44,11 @@ def evaluate_model(
         epoch_loss += loss
 
     return epoch_loss / len(iterator)
+
+# TODO: add more bleu options
+def get_bleu_score(corpus1,corpus2):
+    return get_moses_multi_bleu(corpus1,corpus2)
+
+
+def categorical_accuracy():
+    pass

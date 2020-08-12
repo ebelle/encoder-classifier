@@ -25,12 +25,11 @@ def prep_batch(batch, device):
     # pad source and target sequences
     source = pad_sequence(
         [torch.LongTensor(s) for s in source], batch_first=False, padding_value=0
-    )
+    ).to(device)
     targets = pad_sequence(
         [torch.LongTensor(t) for t in targets], batch_first=False, padding_value=0
-    )
-    src_len = torch.LongTensor(src_len)
-    source, targets, src_len = source.to(device), targets.to(device), src_len.to(device)
+    ).to(device)
+    src_len = torch.LongTensor(src_len).to(device)
     return source, targets, src_len
 
 
@@ -44,7 +43,6 @@ def epoch_time(start_time, end_time):
 def sort_batch(batch):
     batch = sorted(batch, key=lambda x: len(x[0]), reverse=True)
     source, targets, src_len = zip(*[(s, t, l) for (s, t, l) in batch])
-
     return source, targets, src_len
 
 
@@ -63,8 +61,14 @@ class MultipleOptimizer(object):
     def return_optimizers(self):
         return self.optimizers
 
+    def load_optimizers(self):
+        for op in self.optimizers:
+            print(op)
 
-def make_muliti_optim(parameters):
+
+def make_muliti_optim(
+    parameters, learning_rate, adam_state_dict=None, sparseadam_state_dict=None
+):
     """build compound optimizer for adam and sparseadam"""
 
     params = []
@@ -75,7 +79,42 @@ def make_muliti_optim(parameters):
                 params.append(p)
             else:
                 sparse_params.append(p)
-    optimizer = MultipleOptimizer(
-        [optim.Adam(params, lr=1.0e-3,), optim.SparseAdam(sparse_params, lr=1.0e-3)]
-    )
+    adam = optim.Adam(params, lr=learning_rate)
+    sparse = optim.SparseAdam(sparse_params, lr=learning_rate)
+    if adam_state_dict and sparseadam_state_dict:
+        adam.load_state_dict(adam_state_dict)
+        sparse.load_state_dict(sparseadam_state_dict)
+    optimizer = MultipleOptimizer([adam, sparse])
     return optimizer
+
+
+def get_prev_params(prev_state_dict):
+    # gather parameters from pre-trained model
+
+    emb_dim = prev_state_dict["encoder.enc_embedding.weight"].shape[1]
+    enc_hid_dim = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[1]
+    # if NMT and RNN in decoder
+    if "decoder.rnn.weight_hh_l0" in prev_state_dict:
+        dec_hid_dim = prev_state_dict["decoder.rnn.weight_hh_l0"].shape[1]
+    # if classification, use dim from hidden_layer
+    else:
+        dec_hid_dim = prev_state_dict["decoder.hidden_layer.weight"].shape[1]
+
+    # determine if previous model was bidirectional
+    for k in prev_state_dict.keys():
+        if "reverse" in k:
+            bidirectional = True
+            break
+        else:
+            bidirectional = False
+
+    # determine number of layers in previous model
+    # TODO: fix in case of more than 2 layers
+    for k in prev_state_dict.keys():
+        if "l1" in k:
+            num_layers = 2
+            break
+        else:
+            num_layers = 1
+
+    return emb_dim, enc_hid_dim, dec_hid_dim, bidirectional, num_layers
