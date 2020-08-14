@@ -5,13 +5,11 @@ import argparse
 import linecache
 
 from lstm import Seq2Seq
-from utils import prep_batch, get_prev_params
+from utils import prep_batch, get_prev_params, process_line
 from evaluate import get_bleu_score
 
 
-def translate_sentence(
-    source, src_len, trg_field, model, device, max_len
-):
+def translate_sentence(source, src_len, trg_field, model, device, max_len):
 
     model.eval()
 
@@ -44,13 +42,6 @@ def translate_sentence(
 
     return trg_indexes
 
-def process_line(line,SRC,init_token,eos_token,device):
-    source,target = line.split("\t")
-    source = source.split()
-    source = [init_token] + source + [eos_token]
-    source = [SRC.vocab.stoi[t] for t in source]
-    src_len = [len(source)]
-    return source, target, src_len
 
 def main(args):
 
@@ -66,13 +57,9 @@ def main(args):
     pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
     prev_state_dict = torch.load(args.pretrained_model)
-    try:
-        dropout = torch.load(args.model_path)["dropout"]
-    # TODO: Remove this before final version
-    except:
-        dropout = 0.5
+    dropout = torch.load(args.model_path)["dropout"]
 
-    prev_state_dict = prev_state_dict['model_state_dict']
+    prev_state_dict = prev_state_dict["model_state_dict"]
 
     # gather parameters except dec_hid_dim since in this model they are the same
     emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(prev_state_dict)
@@ -105,24 +92,21 @@ def main(args):
         if i % 1000 == True:
             print(i)
         line = linecache.getline(filepath, i + 1)
-        source,target,src_len = process_line(line,SRC,init_token,eos_token,device)
-    
-        pred = translate_sentence(
-            source, src_len, TRG, model, device, max_len=55
-        )
+        source, target, src_len = process_line(line, SRC, init_token, eos_token)
+        targets.append(target)
+        pred = translate_sentence(source, src_len, TRG, model, device, max_len=55)
         # strip init and eos tokens
         pred = pred[1:-1]
         # indices to string
-        pred = ' '.join([TRG.vocab.itos[i] for i in pred])
-        predictions.append(pred)
-        targets.append(target)
+        predictions.append(" ".join([TRG.vocab.itos[i] for i in pred]))
     # optionally save results to file
-    if args.save_file: 
+    if args.save_file:
         with open(args.save_file, "w") as sink:
-            writer = csv.writer(sink,delimiter='\t')
-            writer.writerows(zip(predictions,targets))
+            writer = csv.writer(sink, delimiter="\t")
+            writer.writerows(zip(predictions, targets))
     # print bleu score
-    print(get_bleu_score(predictions,targets))
+    print(get_bleu_score(predictions, targets))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -130,6 +114,10 @@ if __name__ == "__main__":
         "--data-path", help="folder where data and dictionaries are stored"
     )
     parser.add_argument("--pretrained-model", help="filename of pretrained model")
-    parser.add_argument("--save-file",default=None, help="optional filename for saving translated sentences")
+    parser.add_argument(
+        "--save-file",
+        default=None,
+        help="optional filename for saving translated sentences",
+    )
 
     main(parser.parse_args())

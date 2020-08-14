@@ -17,7 +17,6 @@ def load_train_data(SRC, TRG, data_path, source, target):
     return train_data
 
 
-
 # TODO: add in target vectors option
 def main(args):
 
@@ -49,7 +48,7 @@ def main(args):
         SRC = Field()
         TRG = Field(unk_token=None)
 
-        train_data= load_train_data(
+        train_data = load_train_data(
             SRC, TRG, args.data_path, args.source_name, args.target_name
         )
 

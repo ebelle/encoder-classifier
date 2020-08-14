@@ -96,10 +96,11 @@ def make_sort(indices):
     # keep only the indices, not the lengths
     return [x[0] for x in indices]
 
+
 def split_to_tsv(split, X, save_path):
     fields = ["src", "trg"]
-    src = os.path.join(save_path,"temp_src.txt")
-    trg = os.path.join(save_path,"temp_trg.txt")
+    src = os.path.join(save_path, "temp_src.txt")
+    trg = os.path.join(save_path, "temp_trg.txt")
     source = [linecache.getline(src, i).strip() for i in X]
     target = [linecache.getline(trg, i).strip() for i in X]
     with open(os.path.join(save_path, f"{split}.tsv"), "w") as sink:

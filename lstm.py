@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-
+# LSTM
 class Encoder(nn.Module):
     def __init__(
         self, input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, pad_idx
@@ -85,13 +85,7 @@ class Attention(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self,
-        output_dim,
-        emb_dim,
-        hid_dim,
-        num_layers,
-        dropout,
-        bidirectional,
+        self, output_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional,
     ):
         super().__init__()
 
@@ -163,14 +157,9 @@ class Seq2Seq(nn.Module):
         self.encoder = Encoder(
             input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, src_pad_idx
         )
-        
+
         self.decoder = Decoder(
-            output_dim,
-            emb_dim,
-            hid_dim,
-            num_layers,
-            dropout,
-            bidirectional,
+            output_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional,
         )
         self.src_pad_idx = src_pad_idx
         self.device = device

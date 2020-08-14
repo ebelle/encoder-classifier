@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch import optim
 
 from lazy_dataset import LazyDataset
+from bucket_sampler import BucketBatchSampler
 from classifier import Classifier
 from train import train_model
 from evaluate import evaluate_model
@@ -51,26 +52,30 @@ def main(args):
     output_dim = len(TRG.vocab)
     pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
+    # create lazydataset and data loader
+    train_path = os.path.join(args.data_path, "train.tsv")
+    training_set = LazyDataset(train_path, SRC, TRG, "classification")
+
+    bucket_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
+
     # build dictionary of parameters for the Dataloader
     dataloader_params = {
-        "batch_size": args.batch_size,
+        # since bucket sampler returns batch, batch_size is 1
+        "batch_size": 1,
+        # sort_batch reverse sorts for pack_pad_seq
         "collate_fn": sort_batch,
+        "batch_sampler": bucket_batch_sampler,
         "num_workers": args.num_workers,
-        "shuffle": args.shuffle_batch,
+        "shuffle": args.shuffle,
         "pin_memory": True,
+        "drop_last": False,
     }
 
-    # create lazydataset and data loader
-    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG, "classification")
     train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
 
     # load pretrained-model
     prev_state_dict = torch.load(args.model_path)["model_state_dict"]
-    try:
-        enc_dropout = torch.load(args.model_path)["dropout"]
-    # TODO: Remove this before final version
-    except:
-        enc_dropout = 0.5
+    enc_dropout = torch.load(args.model_path)["dropout"]
 
     # gather parameters except dec_hid_dim since the classifier gets this from args
     emb_dim, enc_hid_dim, _, bidirectional, num_layers = get_prev_params(
@@ -120,16 +125,16 @@ def main(args):
             device=device,
             epoch=epoch,
             start_time=start_time,
-            dropout=(enc_dropout, args.dec_dropout),
             save_path=args.save_path,
+            dropout=(enc_dropout, args.dec_dropout),
             checkpoint=args.checkpoint,
         )
 
         # optionally validate
         if args.validate == True:
-            valid_set = LazyDataset(
-                args.data_path, "valid.tsv", SRC, TRG, "classification"
-            )
+            valid_path = os.path.join(args.data_path, "valid.tsv")
+            valid_set = LazyDataset(valid_path, SRC, TRG, "classification")
+            bucket_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
             valid_loss = evaluate_model(
@@ -192,7 +197,7 @@ def main(args):
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
-                    "loss": valid_loss,
+                    "loss": train_loss,
                     "dropout": (enc_dropout, args.dec_dropout),
                 },
                 model_filename,
@@ -226,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--dec-dropout",default=0.1,type=int)
+    parser.add_argument("--dec-dropout", default=0.1, type=int)
     parser.add_argument(
         "--classifier-hid-dim",
         default=512,

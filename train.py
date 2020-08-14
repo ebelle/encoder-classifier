@@ -67,7 +67,7 @@ def train_model(
     for i, batch in enumerate(iterator):
         source, targets, src_len = prep_batch(batch, device)
         optimizer.zero_grad()
-        #try:
+        # try:
         loss = train_step(
             model,
             source,
@@ -109,7 +109,7 @@ def train_model(
                     )
                     print(
                         f"Checkpoint saved at epoch {epoch} batch {i}. Train loss is {loss:.3f}"
-                        )
+                    )
         # skip batch in case of OOM
         except RuntimeError as e:
             if "out of memory" in str(e):

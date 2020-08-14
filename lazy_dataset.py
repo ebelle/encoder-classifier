@@ -4,6 +4,7 @@ import csv
 import os
 import linecache
 
+
 class LazyDataset(Dataset):
     def __init__(self, filepath, source_vocab, target_vocab, task):
         self.source_vocab = source_vocab

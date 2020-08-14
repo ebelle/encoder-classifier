@@ -2,15 +2,15 @@ import os
 import csv
 import torch
 import argparse
+import linecache
 
 from classifier import Classifier
-from utils import prep_batch, get_prev_params
+from utils import prep_batch, get_prev_params, process_line
 from lazy_dataset import LazyDataset
+from evaluate import categorical_accuracy
 
 
-def tag_sentence(
-    source, src_len, src_field, model, device
-):
+def tag_sentence(source, src_len, src_field, model, device):
     model.eval()
 
     source = torch.LongTensor(source).unsqueeze(1).to(device)
@@ -36,20 +36,17 @@ def main(args):
     pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
     prev_state_dict = torch.load(args.pretrained_model)
-    enc_dropout,dec_dropout = torch.load(args.model_path)["dropout"]
+    enc_dropout, dec_dropout = torch.load(args.model_path)["dropout"]
 
-    prev_state_dict = prev_state_dict['model_state_dict']
+    prev_state_dict = prev_state_dict["model_state_dict"]
 
     emb_dim, enc_hid_dim, dec_hid_dim, bidirectional, num_layers = get_prev_params(
-        prev_state_dict)
-
-    # arg is needed for the init, but the model is in eval mode anyways
-    freeze_encoder = False
+        prev_state_dict
+    )
 
     # create model
     model = Classifier(
         prev_state_dict,
-        freeze_encoder,
         input_dim,
         emb_dim,
         enc_hid_dim,
@@ -62,23 +59,26 @@ def main(args):
         pad_idx,
     ).to(device)
 
-    model.load_state_dict(prev_state_dict)
+    test_path = os.path.join(args.data_path, "test.tsv")
+    total_data = sum(1 for _ in open(test_path, "r"))
 
     predictions = []
     targets = []
-    for sample in test_set:
-        source, target, src_len = sample
-        pred = tag_sentence(
-            source, src_len, target, SRC, TRG, model, device, max_len=55
-        )
+    for i in range(total_data):
+        line = linecache.getline(test_path, i + 1)
+        source, target, src_len = process_line(line, SRC)
+        targets.append(target)
+        pred = tag_sentence(source, src_len, SRC, model, device)
         # indices to string
-        predictions.append(' '.join([TRG.vocab.itos[i] for i in pred]))
-        targets.append(' '.join([TRG.vocab.itos[i] for i in target]))
+        predictions.append(" ".join([TRG.vocab.itos[i] for i in pred]))
     # optionally save results to file
-    if args.save_file: 
+    if args.save_file:
         with open(args.save_file, "w") as sink:
-            writer = csv.writer(sink,delimiter='\t')
-            writer.writerows(zip(predictions,targets))
+            writer = csv.writer(sink, delimiter="\t")
+            writer.writerows(zip(predictions, targets))
+    # print categorial accuracy
+    print(categorical_accuracy(predictions, targets))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -86,6 +86,10 @@ if __name__ == "__main__":
         "--data-path", help="folder where data and dictionaries are stored"
     )
     parser.add_argument("--pretrained-model", help="filename of pretrained model")
-    parser.add_argument("--save-file",default=None, help="optional filename for saving translated sentences")
+    parser.add_argument(
+        "--save-file",
+        default=None,
+        help="optional filename for saving translated sentences",
+    )
 
     main(parser.parse_args())

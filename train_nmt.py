@@ -14,6 +14,7 @@ from evaluate import evaluate_model
 from utils import *
 from bucket_sampler import BucketBatchSampler
 
+
 def main(args):
 
     # use cuda if available
@@ -31,70 +32,80 @@ def main(args):
     output_dim = len(TRG.vocab)
     src_pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
-    # build dictionary of parameters for the Dataloader
-    """dataloader_params = {
-        "batch_size": args.batch_size,
-        "collate_fn": sort_batch,
-        "num_workers": args.num_workers,
-        "shuffle": args.shuffle,
-        "pin_memory": True,
-    }"""
-
     # create lazydataset and data loader
-    train_path = os.path.join(args.data_path,"train.tsv")
+    train_path = os.path.join(args.data_path, "train.tsv")
     training_set = LazyDataset(train_path, SRC, TRG, "translation")
 
     bucket_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
-    
+
+    # build dictionary of parameters for the Dataloader
     dataloader_params = {
+        # since bucket sampler returns batch, batch_size is 1
         "batch_size": 1,
+        # sort_batch reverse sorts for pack_pad_seq
         "collate_fn": sort_batch,
-        "batch_sampler" : bucket_batch_sampler,
+        "batch_sampler": bucket_batch_sampler,
         "num_workers": args.num_workers,
         "shuffle": args.shuffle,
         "pin_memory": True,
-        "drop_last":False
+        "drop_last": False,
     }
 
-    train_iterator = torch.utils.data.DataLoader(training_set,**dataloader_params)
+    train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
 
-    #train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
+    if not args.continue_training_model:
+        # create model
+        model = Seq2Seq(
+            input_dim,
+            args.embedding_dim,
+            args.hidden_size,
+            output_dim,
+            args.num_layers,
+            args.dropout,
+            args.bidirectional,
+            src_pad_idx,
+            device,
+        ).to(device)
 
-    # create model
-    model = Seq2Seq(
-        input_dim,
-        args.embedding_dim,
-        args.hidden_size,
-        output_dim,
-        args.num_layers,
-        args.dropout,
-        args.bidirectional,
-        src_pad_idx,
-        device,
-    ).to(device)
+        # optionally randomly initialize weights
+        if args.random_init:
+            model.apply(random_init_weights)
 
-    # optionally randomly initialize weights
-    if args.random_init:
-        model.apply(random_init_weights)
+        # optionally freeze pretrained embeddings
+        if args.freeze_embeddings:
+            try:
+                src_pretrained_embeddings = SRC.vocab.vectors
+                model.encoder.enc_embedding.weight.data.copy_(src_pretrained_embeddings)
+                model.encoder.enc_embedding.weight.requires_grad = False
+            except TypeError:
+                print(
+                    "Cannot freeze embedding layer without pretrained embeddings. Rerun make_vocab with source vectors"
+                )
+        start_epoch = 1
+        optimizer = make_muliti_optim(model.named_parameters(), args.learning_rate)
+        best_valid_loss = float("inf")
 
-    # optionally freeze pretrained embeddings
-    if args.freeze_embeddings:
-        try:
-            src_pretrained_embeddings = SRC.vocab.vectors
-            model.encoder.enc_embedding.weight.data.copy_(src_pretrained_embeddings)
-            model.encoder.enc_embedding.weight.requires_grad = False
-        except TypeError:
-            print(
-                "Cannot freeze embedding layer without pretrained embeddings. Rerun make_vocab with source vectors"
-            )
-
-    print(model)
-    print(f"The model has {count_parameters(model):,} trainable parameters")
-
-    if args.continue_training_model:
+    else:
         model_dict = torch.load(args.continue_training_model)
+        prev_state_dict = model_dict["model_state_dict"]
+        emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(
+            prev_state_dict
+        )
+        dropout = model_dict["dropout"]
+        model = Seq2Seq(
+            input_dim,
+            emb_dim,
+            hid_dim,
+            output_dim,
+            num_layers,
+            dropout,
+            bidirectional,
+            src_pad_idx,
+            device,
+        ).to(device)
+
         start_epoch = model_dict["epoch"]
-        model_state_dict = model_dict["model_state_dict"]
+
         adam_state_dict = model_dict["adam_state_dict"]
         sparse_adam_state_dict = model_dict["sparse_adam_state_dict"]
         optimizer = make_muliti_optim(
@@ -103,16 +114,15 @@ def main(args):
             adam_state_dict,
             sparse_adam_state_dict,
         )
-        model.load_state_dict(model_state_dict)
-        del model_dict,model_state_dict,adam_state_dict,sparse_adam_state_dict
-    else:
-        start_epoch = 1
-        optimizer = make_muliti_optim(model.named_parameters(), args.learning_rate)
+        model.load_state_dict(prev_state_dict)
+        best_valid_loss = model["loss"]
+        del model_dict, prev_state_dict, adam_state_dict, sparse_adam_state_dict
+
+    print(model)
+    print(f"The model has {count_parameters(model):,} trainable parameters")
 
     TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
-
-    best_valid_loss = float("inf")
 
     # training
     for epoch in range(start_epoch, args.epochs + 1):
@@ -136,9 +146,9 @@ def main(args):
         # optionally validate
         if not args.skip_validate:
 
-            valid_set = LazyDataset(
-                args.data_path, "valid.tsv", SRC, TRG, "translation"
-            )
+            valid_path = os.path.join(args.data_path, "valid.tsv")
+            valid_set = LazyDataset(valid_path, SRC, TRG, "translation")
+            bucket_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
             valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
 
             valid_loss = evaluate_model(

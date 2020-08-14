@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
+# Classifier
 class Encoder(nn.Module):
     def __init__(
         self,
@@ -85,7 +85,6 @@ class Classifier(nn.Module):
     def __init__(
         self,
         new_state_dict,
-        freeze_encoder,
         input_dim,
         emb_dim,
         enc_hid_dim,
@@ -96,11 +95,18 @@ class Classifier(nn.Module):
         dec_dropout,
         bidirectional,
         pad_idx,
+        freeze_encoder=False,
     ):
         super().__init__()
 
         self.encoder = Encoder(
-            input_dim, emb_dim, enc_hid_dim, num_layers, enc_dropout, bidirectional, pad_idx
+            input_dim,
+            emb_dim,
+            enc_hid_dim,
+            num_layers,
+            enc_dropout,
+            bidirectional,
+            pad_idx,
         )
         # load data from pre-trained encoder
         self.encoder.load_state_dict(new_state_dict)

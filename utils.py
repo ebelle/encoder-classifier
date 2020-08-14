@@ -118,3 +118,13 @@ def get_prev_params(prev_state_dict):
             num_layers = 1
 
     return emb_dim, enc_hid_dim, dec_hid_dim, bidirectional, num_layers
+
+
+def process_line(line, SRC, init_token=None, eos_token=None):
+    source, target = line.split("\t")
+    source = source.split()
+    if init_token and eos_token:
+        source = [init_token] + source + [eos_token]
+    source = [SRC.vocab.stoi[t] for t in source]
+    src_len = [len(source)]
+    return source, target, src_len
