@@ -12,7 +12,7 @@ from lstm import Seq2Seq
 from train import train_model
 from evaluate import evaluate_model
 from utils import *
-
+from bucket_sampler import BucketBatchSampler
 
 def main(args):
 
@@ -32,17 +32,33 @@ def main(args):
     src_pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
     # build dictionary of parameters for the Dataloader
-    dataloader_params = {
+    """dataloader_params = {
         "batch_size": args.batch_size,
         "collate_fn": sort_batch,
         "num_workers": args.num_workers,
-        "shuffle": args.shuffle_batch,
+        "shuffle": args.shuffle,
         "pin_memory": True,
-    }
+    }"""
 
     # create lazydataset and data loader
-    training_set = LazyDataset(args.data_path, "train.tsv", SRC, TRG, "translation")
-    train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
+    train_path = os.path.join(args.data_path,"train.tsv")
+    training_set = LazyDataset(train_path, SRC, TRG, "translation")
+
+    bucket_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
+    
+    dataloader_params = {
+        "batch_size": 1,
+        "collate_fn": sort_batch,
+        "batch_sampler" : bucket_batch_sampler,
+        "num_workers": args.num_workers,
+        "shuffle": args.shuffle,
+        "pin_memory": True,
+        "drop_last":False
+    }
+
+    train_iterator = torch.utils.data.DataLoader(training_set,**dataloader_params)
+
+    #train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
 
     # create model
     model = Seq2Seq(
@@ -214,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--shuffle-batch", default=False, action="store_true")
+    parser.add_argument("--shuffle", default=False, action="store_true")
     parser.add_argument(
         "--random-init",
         default=False,

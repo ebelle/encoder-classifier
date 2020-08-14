@@ -3,24 +3,18 @@ from torch.utils.data import Dataset
 import csv
 import os
 import linecache
-import subprocess
-
 
 class LazyDataset(Dataset):
-    def __init__(self, data_path, filename, source_vocab, target_vocab, task):
-        self.data_path = data_path
+    def __init__(self, filepath, source_vocab, target_vocab, task):
         self.source_vocab = source_vocab
         self.text_init = self.source_vocab.init_token
         self.text_eos = self.source_vocab.eos_token
         self.target_vocab = target_vocab
         self.target_init = self.target_vocab.init_token
         self.target_eos = self.target_vocab.eos_token
-        self._filepath = os.path.join(data_path, filename)
+        self.filepath = filepath
         # get total file length
-        #self._total_data = int(
-        #    subprocess.check_output("wc -l " + self._filepath, shell=True).split()[0]
-        #)
-        self._total_data = sum(1 for _ in open(self._filepath, "r"))
+        self._total_data = sum(1 for _ in open(self.filepath, "r"))
         self.task = task
 
     def __len__(self):
@@ -41,7 +35,7 @@ class LazyDataset(Dataset):
 
     def __getitem__(self, index):
         "Generates one sample of data"
-        line = linecache.getline(self._filepath, index + 1)
+        line = linecache.getline(self.filepath, index + 1)
         text, target = line.split("\t")
         # string to list, tokenizing on white space
         text, target = text.split(), target.split()

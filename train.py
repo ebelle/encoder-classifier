@@ -84,7 +84,7 @@ def train_model(
 
         # shitty progress bar of sorts
         try:
-            if i != 0 and i % checkpoint == 0:
+            if i != 0 and i % 200 == 0:
                 end_time = time.time()
 
                 batch_mins, batch_secs = epoch_time(start_time, end_time)
