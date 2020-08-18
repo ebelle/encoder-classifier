@@ -28,3 +28,5 @@ python train_nmt.py --data-path ../data/en_zh \
 --save-path ../checkpoints/en_zh --num-workers 4 \
 --num-layers 2 --dropout 0.5 --checkpoint 500 --epochs 10 \
 --validate False --bidirectional True
+
+# When restarting, if you froze embeddings the first time, you need to use the freeze flag again
