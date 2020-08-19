@@ -5,8 +5,9 @@ import argparse
 import linecache
 
 from lstm import Seq2Seq
-from utils import prep_batch, get_prev_params, process_line
+from utils import prep_batch, get_prev_params, process_line, epoch_time
 from evaluate import get_bleu_score
+import time
 
 
 def translate_sentence(source, src_len, trg_field, model, device, max_len):
@@ -21,22 +22,24 @@ def translate_sentence(source, src_len, trg_field, model, device, max_len):
         encoder_outputs, hidden, cell = model.encoder(source, src_len)
 
     mask = model.create_mask(source)
-
+    
+    # first input is the init_token
     trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
+    for i in range(max_len):
 
-    for i in range(src_len):
-
+        # give the most recent token as input
         trg_tensor = torch.LongTensor([trg_indexes[-1]]).to(device)
 
         with torch.no_grad():
             output, hidden, cell = model.decoder(
                 trg_tensor, hidden, cell, encoder_outputs, mask
             )
-
+        # get most likely predicted token
         pred_token = output.argmax(1).item()
 
         trg_indexes.append(pred_token)
 
+        # stop if finished translating as indicated by eos_token
         if pred_token == trg_field.vocab.stoi[trg_field.eos_token]:
             break
 
@@ -56,10 +59,11 @@ def main(args):
     output_dim = len(TRG.vocab)
     pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
-    prev_state_dict = torch.load(args.pretrained_model)
-    dropout = torch.load(args.model_path)["dropout"]
+    model_dict = torch.load(args.pretrained_model)
+    dropout = model_dict["dropout"]
 
-    prev_state_dict = prev_state_dict["model_state_dict"]
+    prev_state_dict = model_dict["model_state_dict"]
+    del model_dict
 
     # gather parameters except dec_hid_dim since in this model they are the same
     emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(prev_state_dict)
@@ -88,9 +92,16 @@ def main(args):
     init_token = SRC.init_token
     eos_token = SRC.eos_token
     print(total_data)
+    if args.save_file:
+        sink = open(args.save_file, "w")
+        writer = csv.writer(sink, delimiter="\t")
+    start_time = time.time()
     for i in range(total_data):
         if i % 1000 == True:
-            print(i)
+            end_time = time.time()
+            epoch_mins, epoch_secs = epoch_time(start_time,end_time)
+            print(f' batch {i} |Time: {epoch_mins}m {epoch_secs}s')
+            start_time = end_time
         line = linecache.getline(filepath, i + 1)
         source, target, src_len = process_line(line, SRC, init_token, eos_token)
         targets.append(target)
@@ -98,12 +109,12 @@ def main(args):
         # strip init and eos tokens
         pred = pred[1:-1]
         # indices to string
-        predictions.append(" ".join([TRG.vocab.itos[i] for i in pred]))
-    # optionally save results to file
-    if args.save_file:
-        with open(args.save_file, "w") as sink:
-            writer = csv.writer(sink, delimiter="\t")
-            writer.writerows(zip(predictions, targets))
+        prediction = " ".join([TRG.vocab.itos[i] for i in pred])
+        predictions.append(prediction)
+        # TODO: move to end of function
+        # optionally save results to file
+        if args.save_file:
+            writer.writerow([prediction, target])
     # print bleu score
     print(get_bleu_score(predictions, targets))
 
@@ -117,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--save-file",
         default=None,
-        help="optional filename for saving translated sentences",
+        help="tsv filename for saving predictions translated sentences",
     )
 
     main(parser.parse_args())

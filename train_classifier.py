@@ -19,10 +19,11 @@ from utils import (
     epoch_time,
     sort_batch,
     get_prev_params,
+    make_muliti_optim
 )
 
 
-def new_encoder_dict(prev_state_dict):
+def remove_encoder_str(prev_state_dict):
 
     new_state_dict = OrderedDict()
 
@@ -44,7 +45,7 @@ def main(args):
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
 
-    SRC = torch.load(os.path.join(args.source_vocab_path, "src_vocab.pt"))
+    SRC = torch.load(os.path.join(args.nmt_data_path, "src_vocab.pt"))
     TRG = torch.load(os.path.join(args.data_path, "trg_vocab.pt"))
 
     # gather parameters from the vocabulary
@@ -56,47 +57,47 @@ def main(args):
     train_path = os.path.join(args.data_path, "train.tsv")
     training_set = LazyDataset(train_path, SRC, TRG, "classification")
 
-    bucket_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
+    train_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
 
     # build dictionary of parameters for the Dataloader
-    dataloader_params = {
+    train_loader_params = {
         # since bucket sampler returns batch, batch_size is 1
         "batch_size": 1,
         # sort_batch reverse sorts for pack_pad_seq
         "collate_fn": sort_batch,
-        "batch_sampler": bucket_batch_sampler,
+        "batch_sampler": train_batch_sampler,
         "num_workers": args.num_workers,
         "shuffle": args.shuffle,
         "pin_memory": True,
         "drop_last": False,
     }
 
-    train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
+    train_iterator = torch.utils.data.DataLoader(training_set, **train_loader_params)
 
     # load pretrained-model
-    prev_state_dict = torch.load(args.model_path)["model_state_dict"]
-    enc_dropout = torch.load(args.model_path)["dropout"]
+    prev_state_dict = torch.load(args.pretrained_model)["model_state_dict"]
+    enc_dropout = torch.load(args.pretrained_model)["dropout"]
 
-    # gather parameters except dec_hid_dim since the classifier gets this from args
+    # gather parameters except dec_hid_dim since classifier gets this from args
     emb_dim, enc_hid_dim, _, bidirectional, num_layers = get_prev_params(
         prev_state_dict
     )
 
-    new_state_dict = new_encoder_dict(prev_state_dict)
+    new_state_dict = remove_encoder_str(prev_state_dict)
 
     model = Classifier(
-        new_state_dict,
-        args.freeze_encoder,
-        input_dim,
-        emb_dim,
-        enc_hid_dim,
-        args.dec_hid_dim,
-        output_dim,
-        num_layers,
-        enc_dropout,
-        args.dec_dropout,
-        bidirectional,
-        pad_idx,
+        new_state_dict=new_state_dict,
+        input_dim=input_dim,
+        emb_dim=emb_dim,
+        enc_hid_dim=enc_hid_dim,
+        dec_hid_dim=args.cls_hid_dim,
+        output_dim=output_dim,
+        num_layers=num_layers,
+        enc_dropout=enc_dropout,
+        dec_dropout=args.cls_dropout,
+        bidirectional=bidirectional,
+        pad_idx=pad_idx,
+        freeze_encoder = args.freeze_encoder,
     ).to(device)
 
     # optionally randomly initialize weights
@@ -106,7 +107,7 @@ def main(args):
     print(model)
     print(f"The model has {count_parameters(model):,} trainable parameters")
 
-    optimizer = optim.Adam(p for p in model.parameters() if p.requires_grad)
+    optimizer = make_muliti_optim(model.named_parameters(), args.learning_rate)
     TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
 
@@ -126,16 +127,28 @@ def main(args):
             epoch=epoch,
             start_time=start_time,
             save_path=args.save_path,
-            dropout=(enc_dropout, args.dec_dropout),
+            dropout=(enc_dropout, args.cls_dropout),
             checkpoint=args.checkpoint,
         )
 
         # optionally validate
-        if args.validate == True:
+        if not args.skip_validate:
             valid_path = os.path.join(args.data_path, "valid.tsv")
             valid_set = LazyDataset(valid_path, SRC, TRG, "classification")
-            bucket_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
-            valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
+            valid_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
+            valid_loader_params = {
+                # since bucket sampler returns batch, batch_size is 1
+                "batch_size": 1,
+                # sort_batch reverse sorts for pack_pad_seq
+                "collate_fn": sort_batch,
+                "batch_sampler": valid_batch_sampler,
+                "num_workers": args.num_workers,
+                "shuffle": args.shuffle,
+                "pin_memory": True,
+                "drop_last": False,
+                }
+
+            valid_iterator = torch.utils.data.DataLoader(valid_set, **valid_loader_params)
 
             valid_loss = evaluate_model(
                 model,
@@ -151,13 +164,15 @@ def main(args):
             epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
             model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
+            adam, sparse_adam = optimizer.return_optimizers()
             torch.save(
                 {
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
+                    "adam_state_dict": adam.state_dict(),
+                    "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": valid_loss,
-                    "dropout": (enc_dropout, args.dec_dropout),
+                    "dropout": (enc_dropout, args.cls_dropout),
                 },
                 model_filename,
             )
@@ -166,13 +181,15 @@ def main(args):
                 best_valid_loss = valid_loss
 
                 best_filename = os.path.join(args.save_path, f"best_model.pt")
+                adam, sparse_adam = optimizer.return_optimizers()
                 torch.save(
                     {
                         "epoch": epoch,
                         "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
+                        "adam_state_dict": adam.state_dict(),
+                        "sparse_adam_state_dict": sparse_adam.state_dict(),
                         "loss": valid_loss,
-                        "dropout": (enc_dropout, args.dec_dropout),
+                        "dropout": (enc_dropout, args.cls_dropout),
                     },
                     best_filename,
                 )
@@ -192,13 +209,15 @@ def main(args):
 
             # save models each epoch
             model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
+            adam, sparse_adam = optimizer.return_optimizers()
             torch.save(
                 {
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
+                    "adam_state_dict": adam.state_dict(),
+                    "sparse_adam_state_dict": sparse_adam.state_dict(),
                     "loss": train_loss,
-                    "dropout": (enc_dropout, args.dec_dropout),
+                    "dropout": (enc_dropout, args.cls_dropout),
                 },
                 model_filename,
             )
@@ -213,9 +232,9 @@ if __name__ == "__main__":
     # hyperparameters
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--source-vocab-path", help="folder where source vocab is stored"
+        "--nmt-data-path", help="folder where source vocab is stored"
     )
-    parser.add_argument("--model-path", help="folder where pre-trained model is stored")
+    parser.add_argument("--pretrained-model", help="folder where pre-trained model is stored")
     parser.add_argument(
         "--data-path", help="folder where data and target vocab are stored"
     )
@@ -231,26 +250,31 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--batch-size", default=64, type=int)
     parser.add_argument("--num-workers", default=0, type=int)
-    parser.add_argument("--dec-dropout", default=0.1, type=int)
+    parser.add_argument("--cls-dropout", default=0.1, type=float)
+    parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
-        "--classifier-hid-dim",
+        "--cls-hid-dim",
         default=512,
         type=int,
         help="hidden dimension for classifier",
     )
-    parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
         "--freeze-encoder",
         default=False,
         action="store_true",
         help="optionally freeze encoder so it does not train",
     )
-    parser.add_argument("--shuffle-batch", default=False, action="store_true")
     parser.add_argument(
         "--random-init",
         default=False,
         action="store_true",
         help="randomly initialize weights",
+    )
+    parser.add_argument(
+        "--shuffle",
+        default=False,
+        action="store_true",
+        help="shuffle batch",
     )
     parser.add_argument(
         "--learning-rate", type=float, default=1e-3, help="learning rate for optimizer"

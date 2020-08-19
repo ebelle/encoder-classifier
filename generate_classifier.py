@@ -72,12 +72,10 @@ def main(args):
         # indices to string
         predictions.append(" ".join([TRG.vocab.itos[i] for i in pred]))
     # optionally save results to file
-    if args.save_file:
-        with open(args.save_file, "w") as sink:
-            writer = csv.writer(sink, delimiter="\t")
-            writer.writerows(zip(predictions, targets))
-    # print categorial accuracy
-    print(categorical_accuracy(predictions, targets))
+    with open(args.save_file, "w") as sink:
+        writer = csv.writer(sink, delimiter="\t")
+        writer.writerows(zip(predictions, targets))
+    #print(categorical_accuracy(predictions, targets))
 
 
 if __name__ == "__main__":

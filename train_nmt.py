@@ -36,24 +36,24 @@ def main(args):
     train_path = os.path.join(args.data_path, "train.tsv")
     training_set = LazyDataset(train_path, SRC, TRG, "translation")
 
-    bucket_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
+    train_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
 
     # build dictionary of parameters for the Dataloader
-    dataloader_params = {
+    train_loader_params = {
         # since bucket sampler returns batch, batch_size is 1
         "batch_size": 1,
         # sort_batch reverse sorts for pack_pad_seq
         "collate_fn": sort_batch,
-        "batch_sampler": bucket_batch_sampler,
+        "batch_sampler": train_batch_sampler,
         "num_workers": args.num_workers,
         "shuffle": args.shuffle,
         "pin_memory": True,
         "drop_last": False,
     }
 
-    train_iterator = torch.utils.data.DataLoader(training_set, **dataloader_params)
+    train_iterator = torch.utils.data.DataLoader(training_set, **train_loader_params)
 
-    if not args.continue_training_model:
+    if not args.continue_model:
         # create model
         model = Seq2Seq(
             input_dim,
@@ -86,7 +86,7 @@ def main(args):
         best_valid_loss = float("inf")
 
     else:
-        model_dict = torch.load(args.continue_training_model)
+        model_dict = torch.load(args.continue_model)
         prev_state_dict = model_dict["model_state_dict"]
         emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(
             prev_state_dict
@@ -103,20 +103,26 @@ def main(args):
             src_pad_idx,
             device,
         ).to(device)
+        
+        if args.freeze_embeddings:
+            model.encoder.enc_embedding.weight.requires_grad = False
 
         start_epoch = model_dict["epoch"]
 
-        adam_state_dict = model_dict["adam_state_dict"]
-        sparse_adam_state_dict = model_dict["sparse_adam_state_dict"]
+        # restart optimizer at training point
         optimizer = make_muliti_optim(
             model.named_parameters(),
             args.learning_rate,
-            adam_state_dict,
-            sparse_adam_state_dict,
+            model_dict["adam_state_dict"],
+            model_dict["sparse_adam_state_dict"],
         )
         model.load_state_dict(prev_state_dict)
-        best_valid_loss = model["loss"]
-        del model_dict, prev_state_dict, adam_state_dict, sparse_adam_state_dict
+        # assumes loading from good starting point.
+        # TODO: possibly fix this
+        best_valid_loss = model_dict["loss"]
+        
+        # free up memory
+        del model_dict, prev_state_dict
 
     print(model)
     print(f"The model has {count_parameters(model):,} trainable parameters")
@@ -148,8 +154,20 @@ def main(args):
 
             valid_path = os.path.join(args.data_path, "valid.tsv")
             valid_set = LazyDataset(valid_path, SRC, TRG, "translation")
-            bucket_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
-            valid_iterator = torch.utils.data.DataLoader(valid_set, **dataloader_params)
+            valid_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
+
+            valid_loader_params = {
+                # since bucket sampler returns batch, batch_size is 1
+                "batch_size": 1,
+                # sort_batch reverse sorts for pack_pad_seq
+                "collate_fn": sort_batch,
+                "batch_sampler": valid_batch_sampler,
+                "num_workers": args.num_workers,
+                "shuffle": args.shuffle,
+                "pin_memory": True,
+                "drop_last": False,
+            }
+            valid_iterator = torch.utils.data.DataLoader(valid_set, **valid_loader_params)
 
             valid_loss = evaluate_model(
                 model,
@@ -271,7 +289,7 @@ if __name__ == "__main__":
         help="freeze source embedding layer",
     )
     parser.add_argument(
-        "--continue-training-model",
+        "--continue-model",
         default=None,
         type=str,
         help="model for restarting training from a saved checkpoint",
