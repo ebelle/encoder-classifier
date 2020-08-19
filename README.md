@@ -27,6 +27,7 @@ python build_vocab.py --data-path ../data/en_ru \
 # Example usage of training NMT:
 
 bash
+<<<<<<< HEAD
 python train_nmt.py --data-path ../data/en_ru \
 --save-path checkpoints/en_ru --num-workers 4 \
 --num-layers 2 --dropout 0.25 --checkpoint 10000 --epochs 10 \
@@ -38,3 +39,11 @@ bash
 python train_nmt.py --data-path ../data/en_ru \
 --save-path checkpoints/en_ru --num-workers 4 \
 --continue-training-model checkpoints/en_ru/checkpoint_2_40000 
+=======
+python train_nmt.py --data-path ../data/en_zh \
+--save-path ../checkpoints/en_zh --num-workers 4 \
+--num-layers 2 --dropout 0.5 --checkpoint 500 --epochs 10 \
+--validate False --bidirectional True
+
+# When restarting, if you froze embeddings the first time, you need to use the freeze flag again
+>>>>>>> e6327261349b0115ca2c7244d76fb301df6862b8
