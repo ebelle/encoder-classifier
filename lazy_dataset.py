@@ -20,24 +20,36 @@ class LazyDataset(Dataset):
     def tokens_to_idx(self, text, target):
         # TODO: add arguments to make init & eos optional
         # add init and eos tokens
-        if self.task == "translation":
+        if self.task == "evaluation":
+            text = [self.text_init] + text + [self.text_eos]
+            # tokens to indices
+            text = [self.source_vocab.vocab.stoi[t] for t in text]
+        elif self.task == "translation":
             text = [self.text_init] + text + [self.text_eos]
             target = [self.target_init] + target + [self.target_eos]
-        # tokens to indices
-        text = [self.source_vocab.vocab.stoi[t] for t in text]
-        target = [self.target_vocab.vocab.stoi[t] for t in target]
+            # tokens to indices
+            text = [self.source_vocab.vocab.stoi[t] for t in text]
+            target = [self.target_vocab.vocab.stoi[t] for t in target]
+        elif self.task == "classification":
+            # tokens to indices
+            text = [self.source_vocab.vocab.stoi[t] for t in text]
+            target = [self.target_vocab.vocab.stoi[t] for t in target]
 
         return text, target
 
-    def __getitem__(self, index):
+    def __getitem__(self, idx):
         "Generates one sample of data"
         # normally you need +1 since linecache indexes from 1
         # here, we skip the header by adding +2 instead of +1
-        line = linecache.getline(self.filepath, index+2)
+        line = linecache.getline(self.filepath, idx+2)
         text, target = line.split("\t")
 
         # string to list, tokenizing on white space
-        text, target = text.split(), target.split()
+        text = text.split()
+        target = target.split()
         text, target = self.tokens_to_idx(text, target)
         text_lens = len(text)
+
+        if self.task == 'evaluation':
+            target = idx
         return text, target, text_lens

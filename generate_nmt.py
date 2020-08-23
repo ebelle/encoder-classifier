@@ -3,48 +3,232 @@ import csv
 import torch
 import argparse
 import linecache
+import numpy as np
+import operator
 
 from lstm import Seq2Seq
-from utils import prep_batch, get_prev_params, process_line, epoch_time
-from evaluate import get_bleu_score
+from lazy_dataset import LazyDataset
+from bucket_sampler import BucketBatchSampler
+from utils import prep_eval_batch, get_prev_params, sort_batch, epoch_time
+from torchtext.data.metrics import bleu_score
+import sacrebleu
 import time
+from queue import PriorityQueue
+import functools
 
 
-def translate_sentence(source, src_len, trg_field, model, device, max_len):
+def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
 
     model.eval()
 
-    # batch size of 1
-    source = torch.LongTensor(source).unsqueeze(1).to(device)
-    src_len = torch.LongTensor(src_len)
-
     with torch.no_grad():
+        batch_size = source.shape[1]
+
+        # tensor to store decoder outputs
+        decoded_batch = torch.zeros((batch_size, max_len))
+
+        # encoder_outputs is all hidden states of the input sequence, back and forwards
+        # hidden is the final forward and backward hidden states, passed through a linear layer
         encoder_outputs, hidden, cell = model.encoder(source, src_len)
 
-    mask = model.create_mask(source)
-    
-    # first input is the init_token
-    trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
-    for i in range(max_len):
+        mask = model.create_mask(source)
 
-        # give the most recent token as input
-        trg_tensor = torch.LongTensor([trg_indexes[-1]]).to(device)
+        # first input is the init_token
+        trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
+        decoder_input = torch.LongTensor([[trg_init] for _ in range(batch_size)]).to(
+            device
+        )
 
-        with torch.no_grad():
-            output, hidden, cell = model.decoder(
-                trg_tensor, hidden, cell, encoder_outputs, mask
+        # [bsz,1] -> [bsz]
+        decoder_input = decoder_input.squeeze(1)
+
+        for t in range(max_len):
+
+            decoder_output, hidden, cell = model.decoder(
+                decoder_input, hidden, cell, encoder_outputs, mask
             )
-        # get most likely predicted token
-        pred_token = output.argmax(1).item()
+            # get most likely predicted token
+            # it will also be the input at the next step
+            decoder_input = decoder_output.data.topk(1)[1].view(-1)
+            decoded_batch[:, t] = decoder_input.detach()
 
-        trg_indexes.append(pred_token)
+    return decoded_batch
 
-        # stop if finished translating as indicated by eos_token
-        if pred_token == trg_field.vocab.stoi[trg_field.eos_token]:
-            break
 
-    return trg_indexes
+def preds_to_toks(preds, vocab_field):
 
+    preds = [[vocab_field.vocab.itos[i] for i in x] for x in preds]
+
+    final = []
+    eos = vocab_field.eos_token
+    for sentence in preds:
+        try:
+            eos_idx = sentence.index(eos)
+            # clip eos and anything after eos
+            sentence = sentence[:eos_idx]
+            final.append(' '.join(sentence))
+        except:
+            # unless there is no eos
+            final.append(' '.join(sentence))
+    # indices to strings
+    return final
+
+
+def get_target(filepath, target_idx):
+    """get target string from file"""
+    line = linecache.getline(filepath, target_idx + 2)
+    # split on tab and get second value, which is the target
+    # strip newline and split on whitespace
+    line = line.split("\t")[1].strip()
+    return line
+
+
+@functools.total_ordering
+class BeamSearchNode(object):
+    def __init__(
+        self, hiddenstate, cellstate, previousNode, wordId, logProb, length
+    ):
+
+        self.h = hiddenstate
+        self.c = cellstate
+        self.prevNode = previousNode
+        self.word_id = wordId
+        self.logp = logProb
+        self.leng = length
+
+    def __eq__(self, other):
+        return self.eval() == other.eval()
+
+    def __ne__(self, other):
+        return self.eval() != other.eval()
+
+    def __lt__(self, other):
+        return self.eval() < other.eval()
+
+    def eval(self, alpha=1.0):
+        reward = 0
+        # optionally add function for shaping reward
+
+        return -self.logp / float(self.leng - 1 + 1e-6) + alpha * reward
+
+
+def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
+
+    # generate one sentence
+    topk = 1
+    decoded_batch = []
+
+    model.eval()
+    with torch.no_grad():
+        encoder_outputs, hidden, cell = model.encoder(source, src_len)
+        mask = model.create_mask(source)
+
+        batch_size = source.shape[1]
+
+        #decode one sentence at a time
+        for idx in range(batch_size):
+
+            # get hidden,cell,enc_output and mask for 1 sequence
+            dec_hid = hidden[:, idx, :].contiguous().unsqueeze(1)
+            dec_cell = cell[:, idx, :].contiguous().unsqueeze(1)
+            single_output = encoder_outputs[:, idx, :].unsqueeze(1)
+            single_mask = mask[idx, :].unsqueeze(0)
+
+            # Start with the start of the sentence token
+            trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
+            decoder_input = torch.LongTensor([[trg_init]]).to(device)
+
+            # Number of sentences to generate
+            endnodes = []
+            number_required = min((topk + 1), topk - len(endnodes))
+
+            # starting node
+            node = BeamSearchNode(
+                hiddenstate=dec_hid,
+                cellstate=dec_cell,
+                previousNode=None,
+                wordId=decoder_input,
+                logProb=0,
+                length=1,
+            )
+            nodes = PriorityQueue()
+
+            # start the queue
+            nodes.put(node)
+            qsize = 1
+
+            # start beam search
+            while True:
+                # give up when decoding takes too long
+                if qsize > 2000:
+                    break
+
+                # fetch the best node
+                n = nodes.get()
+                decoder_input = n.word_id.squeeze(1)
+                dec_hid = n.h
+                dec_cell = n.c
+
+                if n.word_id.item() == trg_vocab.eos_token and n.prevNode != None:
+                    endnodes.append(n)
+                    # if we reached maximum # of sentences required
+                    if len(endnodes) >= number_required:
+                        break
+                    else:
+                        continue
+
+                # decode for one step using decoder
+                decoder_output, dec_hid, dec_cell = model.decoder(
+                    decoder_input,
+                    dec_hid, 
+                    dec_cell, 
+                    single_output,
+                    single_mask,
+                )
+                # beam search of top N where N is beam width
+                log_prob, indexes = torch.topk(decoder_output, beam_width)
+                nextnodes = []
+
+                for new_k in range(beam_width):
+                    decoded_t = indexes[0][new_k].view(1, -1)
+                    log_p = log_prob[0][new_k].item()
+
+                    node = BeamSearchNode(
+                        dec_hid,
+                        dec_cell,
+                        n,
+                        decoded_t,
+                        n.logp + log_p,
+                        n.leng + 1,
+                    )
+                    nextnodes.append(node)
+
+                # put them into queue
+                for i in range(len(nextnodes)):
+                    nn = nextnodes[i]
+                    nodes.put(nn)
+                    # increase qsize
+                qsize += len(nextnodes) - 1
+
+            # choose nbest paths, back trace them
+            if len(endnodes) == 0:
+                endnodes = [nodes.get() for _ in range(topk)]
+
+            preds = []
+            for n in sorted(endnodes):
+                single_pred = []
+                single_pred.append(n.word_id.item())
+                # back trace
+                while n.prevNode:
+                    n = n.prevNode
+                    single_pred.append(n.word_id.item())
+
+                single_pred = single_pred[::-1]
+                # snip off init_token
+                preds.append(single_pred[1:])
+
+            decoded_batch.append(preds[0])
+    return decoded_batch
 
 def main(args):
 
@@ -82,41 +266,67 @@ def main(args):
     ).to(device)
 
     model.load_state_dict(prev_state_dict)
+    del prev_state_dict
     print(model)
 
-    filepath = os.path.join(args.data_path, "test.tsv")
-    total_data = sum(1 for _ in open(filepath, "r"))
+    test_path = os.path.join(args.data_path, "test.tsv")
+    test_set = LazyDataset(test_path, SRC, TRG, "evaluation")
 
-    predictions = []
-    targets = []
-    init_token = SRC.init_token
-    eos_token = SRC.eos_token
-    print(total_data)
+    test_batch_sampler = BucketBatchSampler(test_path, args.batch_size)
+
+    # build dictionary of parameters for the Dataloader
+    test_loader_params = {
+        # since bucket sampler returns batch, batch_size is 1
+        "batch_size": 1,
+        # sort_batch reverse sorts for pack_pad_seq
+        "collate_fn": sort_batch,
+        "batch_sampler": test_batch_sampler,
+        "num_workers": args.num_workers,
+        "shuffle": False,
+        "pin_memory": True,
+        "drop_last": False,
+    }
+
+    test_iterator = torch.utils.data.DataLoader(test_set, **test_loader_params)
+
+    start_time = time.time()
+
+    final_preds = []
+    final_targets = []
+    for i, batch in enumerate(test_iterator):
+        source, target_indicies, src_len = prep_eval_batch(batch, device)
+        # get targets from file
+        final_targets += [get_target(test_path, idx) for idx in target_indicies]
+
+        if args.decode_method == "beam":
+            final_preds += preds_to_toks(
+                beam_decode(source, src_len, TRG, model, device), TRG
+            )
+
+        elif args.decode_method == "greedy":
+            preds = greedy_decode(source, src_len, TRG, model, device)
+            # tensor to cpu to integer numpy array for quicker processing
+            preds = preds.cpu().numpy().astype(int)
+            final_preds += preds_to_toks(preds, TRG)
+
+        if i % 5 == 0:
+            end_time = time.time()
+            epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+            print(f" batch {i} |Time: {epoch_mins}m {epoch_secs}s")
+            start_time = end_time
+   
     if args.save_file:
         sink = open(args.save_file, "w")
         writer = csv.writer(sink, delimiter="\t")
-    start_time = time.time()
-    for i in range(total_data):
-        if i % 1000 == True:
-            end_time = time.time()
-            epoch_mins, epoch_secs = epoch_time(start_time,end_time)
-            print(f' batch {i} |Time: {epoch_mins}m {epoch_secs}s')
-            start_time = end_time
-        line = linecache.getline(filepath, i + 1)
-        source, target, src_len = process_line(line, SRC, init_token, eos_token)
-        targets.append(target)
-        pred = translate_sentence(source, src_len, TRG, model, device, max_len=55)
-        # strip init and eos tokens
-        pred = pred[1:-1]
-        # indices to string
-        prediction = " ".join([TRG.vocab.itos[i] for i in pred])
-        predictions.append(prediction)
-        # TODO: move to end of function
-        # optionally save results to file
-        if args.save_file:
-            writer.writerow([prediction, target])
-    # print bleu score
-    print(get_bleu_score(predictions, targets))
+        writer.writerows(zip(final_preds, final_targets))
+
+    if args.bleu == 'sacrebleu':
+        final_preds = [final_preds]
+        print(sacrebleu.corpus_bleu(final_targets,final_preds).score)
+    elif args.bleu == 'torch_bleu':
+        final_preds = [p.split() for p in final_preds]
+        final_targets = [t.split() for t in final_targets]
+        print(bleu_score(final_targets,final_preds))
 
 
 if __name__ == "__main__":
@@ -125,6 +335,16 @@ if __name__ == "__main__":
         "--data-path", help="folder where data and dictionaries are stored"
     )
     parser.add_argument("--pretrained-model", help="filename of pretrained model")
+    parser.add_argument("--batch-size", default=512, type=int, help="batch size")
+    parser.add_argument("--num-workers", default=0, type=int)
+    parser.add_argument(
+        "--decode-method",
+        default="beam",
+        choices=["greedy", "beam"],
+        type=str,
+        help="decoder method. choices are beam or greedy",
+    )
+    parser.add_argument("--bleu",default='torch_bleu',choices=['sacrebleu','torch_bleu'],help='bleu score. choices are sacrebleu and torch_bleu')
     parser.add_argument(
         "--save-file",
         default=None,

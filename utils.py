@@ -1,3 +1,5 @@
+import os
+import glob
 import torch
 import torch.nn as nn
 from torch import optim
@@ -31,6 +33,20 @@ def prep_batch(batch, device):
     ).to(device)
     src_len = torch.LongTensor(src_len).to(device)
     return source, targets, src_len
+
+
+
+def prep_eval_batch(batch, device):
+    """pad source sequence. target stays as indexes of lines in file"""
+
+    source, trg_indices, src_len = batch
+    # pad source and target sequences
+    source = pad_sequence(
+        [torch.LongTensor(s) for s in source], batch_first=False, padding_value=0
+    ).to(device)
+
+    src_len = torch.LongTensor(src_len).to(device)
+    return source, trg_indices, src_len
 
 
 def epoch_time(start_time, end_time):
@@ -120,11 +136,18 @@ def get_prev_params(prev_state_dict):
     return emb_dim, enc_hid_dim, dec_hid_dim, bidirectional, num_layers
 
 
-def process_line(line, SRC, init_token=None, eos_token=None):
-    source, target = line.split("\t")
-    source = source.split()
-    if init_token and eos_token:
-        source = [init_token] + source + [eos_token]
-    source = [SRC.vocab.stoi[t] for t in source]
-    src_len = [len(source)]
-    return source, target, src_len
+def process_line(line, vocab_field, init_eos=False):
+    line = line.split()
+    if init_eos:
+        line = [vocab_field.vocab.init_token] + line + [vocab_field.vocab.eos_token]
+    line = [vocab_field.vocab.stoi[t] for t in line]
+    return line
+
+def get_best_loss(models_folder):
+    glob_folder = os.path.join(models_folder,'*')
+    len_folder = len(models_folder)+1
+    losses = {}
+    for model in glob.glob(glob_folder):
+        loss = round(torch.load(model)['loss'],4)
+        losses[model[len_folder:]] = loss
+    print({k: v for k, v in sorted(losses.items(), key=lambda item: item[1])})
