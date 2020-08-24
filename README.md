@@ -12,7 +12,6 @@ If using translation_data_prep:
 
 # Example usage of cleaning data for NMT task:
 
-bash
 python data_prep.py  \
 --task translation \
 --save-path ../data/en_ru \
@@ -25,7 +24,6 @@ python data_prep.py  \
 
 # Example usage of building vocabulary using English source word embeddings:
 
-bash
 python build_vocab.py \
 --data-path ../data/en_ru \
 --task translation \
@@ -36,7 +34,6 @@ python build_vocab.py \
 
 # Example usage of training NMT:
 
-bash
 python train_nmt.py \
 --data-path ../data/en_ru \
 --save-path checkpoints/en_ru \
@@ -48,9 +45,9 @@ python train_nmt.py \
 --bidirectional 
 
 # Example usage of restarting training:
-# When restarting, if you froze embeddings the first time, you need to use the freeze flag again
 
-bash
+When restarting, if you froze embeddings the first time, you need to use the freeze flag again
+
 python train_nmt.py --data-path ../data/en_ru \
 --save-path checkpoints/en_ru \
 --num-workers 4 \
