@@ -10,40 +10,51 @@ If using translation_data_prep:
  - Spacy Russian tokenizer: https://github.com/aatimofeev/spacy_russian_tokenizer
 
 
-# Example usage of cleaning data:
+# Example usage of cleaning data for NMT task:
 
 bash
-python translation_data_prep.py  --save-path ../data/en_ru \
---src-file data/UNv1.0.6way.en --trg-file data/UNv1.0.6way.zh \
---max-len 55 --min-len 5 --src-tok en --trg-tok zh
+python data_prep.py  \
+--task translation \
+--save-path ../data/en_ru \
+--src-file data/UNv1.0.6way.en \
+--trg-file data/UNv1.0.6way.zh \
+--max-len 55 \
+--min-len 5 \
+--src-tok en \
+--trg-tok zh 
 
 # Example usage of building vocabulary using English source word embeddings:
 
 bash
-python build_vocab.py --data-path ../data/en_ru \
---task translation --source-name src --target-name trg \
---max-vocab-size 60000 --source-vectors embeddings/crawl-300d-2M.vec
+python build_vocab.py \
+--data-path ../data/en_ru \
+--task translation \
+--source-name src 
+--target-name trg \
+--max-vocab-size 60000 \
+--source-vectors embeddings/crawl-300d-2M.vec
 
 # Example usage of training NMT:
 
 bash
-<<<<<<< HEAD
-python train_nmt.py --data-path ../data/en_ru \
---save-path checkpoints/en_ru --num-workers 4 \
---num-layers 2 --dropout 0.25 --checkpoint 10000 --epochs 10 \
+python train_nmt.py \
+--data-path ../data/en_ru \
+--save-path checkpoints/en_ru \
+--num-workers 4 \
+--num-layers 2 \
+--dropout 0.25 \
+--checkpoint 10000 \
+--epochs 10 \
 --bidirectional 
 
 # Example usage of restarting training:
+# When restarting, if you froze embeddings the first time, you need to use the freeze flag again
 
 bash
 python train_nmt.py --data-path ../data/en_ru \
---save-path checkpoints/en_ru --num-workers 4 \
---continue-training-model checkpoints/en_ru/checkpoint_2_40000 
-=======
-python train_nmt.py --data-path ../data/en_zh \
---save-path ../checkpoints/en_zh --num-workers 4 \
---num-layers 2 --dropout 0.5 --checkpoint 500 --epochs 10 \
---validate False --bidirectional True
+--save-path checkpoints/en_ru \
+--num-workers 4 \
+--continue-training-model checkpoints/en_ru/checkpoint_2_40000 \
+--freeze-embeddings
 
-# When restarting, if you froze embeddings the first time, you need to use the freeze flag again
->>>>>>> e6327261349b0115ca2c7244d76fb301df6862b8
+
