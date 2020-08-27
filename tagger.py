@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Classifier
+# Tagger
 class Encoder(nn.Module):
     def __init__(
         self,
@@ -61,19 +61,30 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     def __init__(
-        self, enc_hid_dim, dec_hid_dim, output_dim, dec_dropout, bidirectional, pad_idx,
+        self,
+        enc_hid_dim,
+        dec_hid_dim,
+        dec_layers,
+        output_dim,
+        dec_dropout,
+        bidirectional,
+        pad_idx,
     ):
         super().__init__()
 
+        self.dec_layers = dec_layers
         self.dropout = nn.Dropout(dec_dropout)
-
-        self.hidden_layer = nn.Linear(enc_hid_dim, dec_hid_dim)
+        self.hidden_layer1 = nn.Linear(enc_hid_dim, dec_hid_dim)
+        if self.dec_layers == 2:
+            self.hidden_layer2 = nn.Linear(dec_hid_dim, dec_hid_dim)
         self.final_out = nn.Linear(dec_hid_dim, output_dim)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, encoder_outputs):
 
-        x = self.hidden_layer(encoder_outputs)
+        x = self.hidden_layer1(encoder_outputs)
+        if self.dec_layers == 2:
+            x = self.hidden_layer2(x)
         x = self.dropout(x)
 
         x = self.final_out(x)
@@ -81,21 +92,21 @@ class Decoder(nn.Module):
         return x
 
 
-class Classifier(nn.Module):
+class Tagger(nn.Module):
     def __init__(
         self,
-        new_state_dict,
         input_dim,
         emb_dim,
         enc_hid_dim,
         dec_hid_dim,
         output_dim,
-        num_layers,
+        enc_layers,
+        dec_layers,
         enc_dropout,
         dec_dropout,
         bidirectional,
         pad_idx,
-        freeze_encoder=False,
+        new_state_dict=None,
     ):
         super().__init__()
 
@@ -103,20 +114,23 @@ class Classifier(nn.Module):
             input_dim,
             emb_dim,
             enc_hid_dim,
-            num_layers,
+            enc_layers,
             enc_dropout,
             bidirectional,
             pad_idx,
         )
-        # load data from pre-trained encoder
-        self.encoder.load_state_dict(new_state_dict)
-        # optionally freeze encoder
-        if freeze_encoder == True:
-            for param in self.encoder.parameters():
-                param.requires_grad = False
+        if new_state_dict:
+            # load data from pre-trained encoder
+            self.encoder.load_state_dict(new_state_dict)
 
         self.decoder = Decoder(
-            enc_hid_dim, dec_hid_dim, output_dim, dec_dropout, bidirectional, pad_idx
+            enc_hid_dim,
+            dec_hid_dim,
+            dec_layers,
+            output_dim,
+            dec_dropout,
+            bidirectional,
+            pad_idx,
         )
 
     def forward(self, src, src_len):

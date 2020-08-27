@@ -7,12 +7,30 @@ import torch
 import torch.nn as nn
 from torch import optim
 
+import matplotlib.pyplot as plt
+
 from lazy_dataset import LazyDataset
 from lstm import Seq2Seq
 from train import train_model
 from evaluate import evaluate_model
 from utils import *
 from bucket_sampler import BucketBatchSampler
+
+
+def make_loss_plot(model_history):
+    ax = plt.subplot(111)
+    # Hide the right and top spines
+    ax.spines["right"].set_visible(False)
+    ax.spines["top"].set_visible(False)
+    ax.plot(
+        list(range(1, len(model_history) + 1)), model_history, label="training loss"
+    )
+    plt.xlabel("batch", fontsize=16)
+    plt.ylabel("training loss", fontsize=14)
+    ax.set_title("Training Loss", fontsize=20, pad=40)
+    plt.xticks(list(range(100, len(model_history) + 1, 100)))
+    plt.legend()
+    plt.show()
 
 
 def main(args):
@@ -88,22 +106,20 @@ def main(args):
     else:
         model_dict = torch.load(args.continue_model)
         prev_state_dict = model_dict["model_state_dict"]
-        emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(
-            prev_state_dict
-        )
+        prev_param_dict = get_prev_params(prev_state_dict)
         dropout = model_dict["dropout"]
         model = Seq2Seq(
             input_dim,
-            emb_dim,
-            hid_dim,
+            prev_param_dict["emb_dim"],
+            prev_param_dict["enc_hid_dim"],
             output_dim,
-            num_layers,
+            prev_param_dict["enc_layers"],
             dropout,
-            bidirectional,
+            prev_param_dict["bidirectional"],
             src_pad_idx,
             device,
         ).to(device)
-        
+
         if args.freeze_embeddings:
             model.encoder.enc_embedding.weight.requires_grad = False
 
@@ -117,10 +133,10 @@ def main(args):
             model_dict["sparse_adam_state_dict"],
         )
         model.load_state_dict(prev_state_dict)
-        # assumes loading from good starting point.
+        # assumes loading from starting point with best loss
         # TODO: possibly fix this
         best_valid_loss = model_dict["loss"]
-        
+
         # free up memory
         del model_dict, prev_state_dict
 
@@ -131,9 +147,10 @@ def main(args):
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
 
     # training
+    loss_history = []
     for epoch in range(start_epoch, args.epochs + 1):
         start_time = time.time()
-        train_loss = train_model(
+        train_loss, batch_loss = train_model(
             model,
             train_iterator,
             task="translation",
@@ -148,7 +165,7 @@ def main(args):
             teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
         )
-
+        loss_history += batch_loss
         # optionally validate
         if not args.skip_validate:
 
@@ -167,7 +184,9 @@ def main(args):
                 "pin_memory": True,
                 "drop_last": False,
             }
-            valid_iterator = torch.utils.data.DataLoader(valid_set, **valid_loader_params)
+            valid_iterator = torch.utils.data.DataLoader(
+                valid_set, **valid_loader_params
+            )
 
             valid_loss = evaluate_model(
                 model,
@@ -245,6 +264,8 @@ def main(args):
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
+    if args.loss_plot:
+        make_loss_plot(loss_history)
 
 
 if __name__ == "__main__":
@@ -294,4 +315,8 @@ if __name__ == "__main__":
         type=str,
         help="model for restarting training from a saved checkpoint",
     )
+    parser.add_argument(
+        "--loss-plot", default=False, action="store_true", help="create a loss plot"
+    )
+
     main(parser.parse_args())

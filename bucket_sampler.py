@@ -8,7 +8,7 @@ class BucketBatchSampler(Sampler):
     def __init__(self, filepath, batch_size):
         self.batch_size = batch_size
         ind_n_len = []
-        total_data = sum(1 for _ in open(filepath, "r"))-1
+        total_data = sum(1 for _ in open(filepath, "r")) - 1
         for i in range(total_data):
             text = linecache.getline(filepath, i + 2).split("\t")[1]
             ind_n_len.append((i, len(text)))
@@ -17,7 +17,7 @@ class BucketBatchSampler(Sampler):
         self.num_batches = len(self.batch_list)
 
     def _generate_batch_map(self):
-        # shuffle all of the indices first 
+        # shuffle all of the indices first
         shuffle(self.ind_n_len)
         # Organize lengths
         batch_map = OrderedDict()
@@ -46,9 +46,5 @@ class BucketBatchSampler(Sampler):
         self.batch_list = self._generate_batch_map()
         # shuffle batches
         shuffle(self.batch_list)
-        with open('trial.txt','w') as sink:
-            for batch in self.batch_list:
-                for x in batch:
-                    sink.write(str(x)+'\n')
         for i in self.batch_list:
             yield i

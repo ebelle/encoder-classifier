@@ -35,7 +35,6 @@ def prep_batch(batch, device):
     return source, targets, src_len
 
 
-
 def prep_eval_batch(batch, device):
     """pad source sequence. target stays as indexes of lines in file"""
 
@@ -107,33 +106,52 @@ def make_muliti_optim(
 def get_prev_params(prev_state_dict):
     # gather parameters from pre-trained model
 
-    emb_dim = prev_state_dict["encoder.enc_embedding.weight"].shape[1]
-    enc_hid_dim = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[1]
-    # if NMT and RNN in decoder
+    # create dict to store paramaters
+    prev_param_dict = {}
+
+    prev_param_dict["emb_dim"] = prev_state_dict["encoder.enc_embedding.weight"].shape[
+        1
+    ]
+    prev_param_dict["enc_hid_dim"] = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[
+        1
+    ]
+
+    # for NMT
     if "decoder.rnn.weight_hh_l0" in prev_state_dict:
-        dec_hid_dim = prev_state_dict["decoder.rnn.weight_hh_l0"].shape[1]
-    # if classification, use dim from hidden_layer
+        prev_param_dict["dec_hid_dim"] = prev_state_dict[
+            "decoder.rnn.weight_hh_l0"
+        ].shape[1]
     else:
-        dec_hid_dim = prev_state_dict["decoder.hidden_layer.weight"].shape[1]
+        prev_param_dict["dec_hid_dim"] = prev_state_dict[
+            "decoder.hidden_layer1.weight"
+        ].shape[0]
 
     # determine if previous model was bidirectional
     for k in prev_state_dict.keys():
         if "reverse" in k:
-            bidirectional = True
+            prev_param_dict["bidirectional"] = True
+            # stop once you've found the key you want
             break
         else:
-            bidirectional = False
+            prev_param_dict["bidirectional"] = False
 
     # determine number of layers in previous model
     # TODO: fix in case of more than 2 layers
     for k in prev_state_dict.keys():
         if "l1" in k:
-            num_layers = 2
+            prev_param_dict["enc_layers"] = 2
+            # stop once you've found the key you want
             break
         else:
-            num_layers = 1
+            prev_param_dict["enc_layers"] = 1
 
-    return emb_dim, enc_hid_dim, dec_hid_dim, bidirectional, num_layers
+    # for tagger, check for 2nd layer in decoder
+    if "decoder.hidden_layer2" in prev_state_dict:
+        prev_param_dict["dec_layers"] = 2
+    else:
+        prev_param_dict["dec_layers"] = 1
+
+    return prev_param_dict
 
 
 def process_line(line, vocab_field, init_eos=False):
@@ -143,11 +161,12 @@ def process_line(line, vocab_field, init_eos=False):
     line = [vocab_field.vocab.stoi[t] for t in line]
     return line
 
+
 def get_best_loss(models_folder):
-    glob_folder = os.path.join(models_folder,'*')
-    len_folder = len(models_folder)+1
+    glob_folder = os.path.join(models_folder, "*")
+    len_folder = len(models_folder) + 1
     losses = {}
     for model in glob.glob(glob_folder):
-        loss = round(torch.load(model)['loss'],4)
+        loss = round(torch.load(model)["loss"], 4)
         losses[model[len_folder:]] = loss
     print({k: v for k, v in sorted(losses.items(), key=lambda item: item[1])})

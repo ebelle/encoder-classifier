@@ -33,6 +33,8 @@ def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
 
         mask = model.create_mask(source)
 
+        # free up memory
+        del source, src_len
         # first input is the init_token
         trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
         decoder_input = torch.LongTensor([[trg_init] for _ in range(batch_size)]).to(
@@ -50,12 +52,13 @@ def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
             # get most likely predicted token
             # it will also be the input at the next step
             decoder_input = decoder_output.data.topk(1)[1].view(-1)
-            decoded_batch[:, t] = decoder_input.detach()
+            # speed up processing by moving to cpu
+            decoded_batch[:, t] = decoder_input.cpu()
 
     return decoded_batch
 
 
-def preds_to_toks(preds, vocab_field):
+def preds_to_toks(preds, vocab_field, min_len=5):
 
     preds = [[vocab_field.vocab.itos[i] for i in x] for x in preds]
 
@@ -66,10 +69,13 @@ def preds_to_toks(preds, vocab_field):
             eos_idx = sentence.index(eos)
             # clip eos and anything after eos
             sentence = sentence[:eos_idx]
-            final.append(' '.join(sentence))
+            final.append(" ".join(sentence))
+        # unless there is no eos
         except:
-            # unless there is no eos
-            final.append(' '.join(sentence))
+            # clip trailing unks
+            while len(sentence) > min_len and sentence[-1] == "<unk>":
+                del sentence[-1]
+            final.append(" ".join(sentence))
     # indices to strings
     return final
 
@@ -85,9 +91,7 @@ def get_target(filepath, target_idx):
 
 @functools.total_ordering
 class BeamSearchNode(object):
-    def __init__(
-        self, hiddenstate, cellstate, previousNode, wordId, logProb, length
-    ):
+    def __init__(self, hiddenstate, cellstate, previousNode, wordId, logProb, length):
 
         self.h = hiddenstate
         self.c = cellstate
@@ -95,6 +99,11 @@ class BeamSearchNode(object):
         self.word_id = wordId
         self.logp = logProb
         self.leng = length
+
+    def free_up_space(self):
+        # reduce memory usage
+        del self.h, self.c
+        self.word_id = self.word_id.item()
 
     def __eq__(self, other):
         return self.eval() == other.eval()
@@ -121,22 +130,23 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
     model.eval()
     with torch.no_grad():
         encoder_outputs, hidden, cell = model.encoder(source, src_len)
+        encoder_outputs, hidden, cell = encoder_outputs.cpu(), hidden.cpu(), cell.cpu()
         mask = model.create_mask(source)
 
         batch_size = source.shape[1]
+        trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
 
-        #decode one sentence at a time
+        # decode one sentence at a time
         for idx in range(batch_size):
 
             # get hidden,cell,enc_output and mask for 1 sequence
             dec_hid = hidden[:, idx, :].contiguous().unsqueeze(1)
             dec_cell = cell[:, idx, :].contiguous().unsqueeze(1)
-            single_output = encoder_outputs[:, idx, :].unsqueeze(1)
+            single_output = encoder_outputs[:, idx, :].unsqueeze(1).to(device)
             single_mask = mask[idx, :].unsqueeze(0)
 
             # Start with the start of the sentence token
-            trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
-            decoder_input = torch.LongTensor([[trg_init]]).to(device)
+            decoder_input = torch.LongTensor([[trg_init]])
 
             # Number of sentences to generate
             endnodes = []
@@ -165,11 +175,12 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
 
                 # fetch the best node
                 n = nodes.get()
-                decoder_input = n.word_id.squeeze(1)
-                dec_hid = n.h
-                dec_cell = n.c
+                decoder_input = n.word_id.squeeze(1).to(device)
+                dec_hid = n.h.to(device)
+                dec_cell = n.c.to(device)
+                n.free_up_space()
 
-                if n.word_id.item() == trg_vocab.eos_token and n.prevNode != None:
+                if n.word_id == trg_vocab.eos_token and n.prevNode != None:
                     endnodes.append(n)
                     # if we reached maximum # of sentences required
                     if len(endnodes) >= number_required:
@@ -179,25 +190,22 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
 
                 # decode for one step using decoder
                 decoder_output, dec_hid, dec_cell = model.decoder(
-                    decoder_input,
-                    dec_hid, 
-                    dec_cell, 
-                    single_output,
-                    single_mask,
+                    decoder_input, dec_hid, dec_cell, single_output, single_mask,
                 )
                 # beam search of top N where N is beam width
                 log_prob, indexes = torch.topk(decoder_output, beam_width)
                 nextnodes = []
+                del decoder_output
 
                 for new_k in range(beam_width):
                     decoded_t = indexes[0][new_k].view(1, -1)
                     log_p = log_prob[0][new_k].item()
 
                     node = BeamSearchNode(
-                        dec_hid,
-                        dec_cell,
+                        dec_hid.cpu(),
+                        dec_cell.cpu(),
                         n,
-                        decoded_t,
+                        decoded_t.cpu(),
                         n.logp + log_p,
                         n.leng + 1,
                     )
@@ -217,11 +225,11 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
             preds = []
             for n in sorted(endnodes):
                 single_pred = []
-                single_pred.append(n.word_id.item())
+                single_pred.append(n.word_id)
                 # back trace
                 while n.prevNode:
                     n = n.prevNode
-                    single_pred.append(n.word_id.item())
+                    single_pred.append(n.word_id)
 
                 single_pred = single_pred[::-1]
                 # snip off init_token
@@ -229,6 +237,7 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
 
             decoded_batch.append(preds[0])
     return decoded_batch
+
 
 def main(args):
 
@@ -250,17 +259,17 @@ def main(args):
     del model_dict
 
     # gather parameters except dec_hid_dim since in this model they are the same
-    emb_dim, hid_dim, _, bidirectional, num_layers = get_prev_params(prev_state_dict)
+    prev_param_dict = get_prev_params(prev_state_dict)
 
     # create model
     model = Seq2Seq(
         input_dim,
-        emb_dim,
-        hid_dim,
+        prev_param_dict["emb_dim"],
+        prev_param_dict["enc_hid_dim"],
         output_dim,
-        num_layers,
+        prev_param_dict["enc_layers"],
         dropout,
-        bidirectional,
+        prev_param_dict["bidirectional"],
         pad_idx,
         device,
     ).to(device)
@@ -305,8 +314,8 @@ def main(args):
 
         elif args.decode_method == "greedy":
             preds = greedy_decode(source, src_len, TRG, model, device)
-            # tensor to cpu to integer numpy array for quicker processing
-            preds = preds.cpu().numpy().astype(int)
+            # tensor to integer numpy array for quicker processing
+            preds = preds.numpy().astype(int)
             final_preds += preds_to_toks(preds, TRG)
 
         if i % 5 == 0:
@@ -314,19 +323,19 @@ def main(args):
             epoch_mins, epoch_secs = epoch_time(start_time, end_time)
             print(f" batch {i} |Time: {epoch_mins}m {epoch_secs}s")
             start_time = end_time
-   
+
     if args.save_file:
         sink = open(args.save_file, "w")
         writer = csv.writer(sink, delimiter="\t")
         writer.writerows(zip(final_preds, final_targets))
 
-    if args.bleu == 'sacrebleu':
+    if args.bleu == "sacrebleu":
         final_preds = [final_preds]
-        print(sacrebleu.corpus_bleu(final_targets,final_preds).score)
-    elif args.bleu == 'torch_bleu':
+        print(sacrebleu.corpus_bleu(final_targets, final_preds).score)
+    elif args.bleu == "torch_bleu":
         final_preds = [p.split() for p in final_preds]
-        final_targets = [t.split() for t in final_targets]
-        print(bleu_score(final_targets,final_preds))
+        final_targets = [[t.split()] for t in final_targets]
+        print(bleu_score(final_preds, final_targets))
 
 
 if __name__ == "__main__":
@@ -344,7 +353,12 @@ if __name__ == "__main__":
         type=str,
         help="decoder method. choices are beam or greedy",
     )
-    parser.add_argument("--bleu",default='torch_bleu',choices=['sacrebleu','torch_bleu'],help='bleu score. choices are sacrebleu and torch_bleu')
+    parser.add_argument(
+        "--bleu",
+        default="torch_bleu",
+        choices=["sacrebleu", "torch_bleu"],
+        help="bleu score. choices are sacrebleu and torch_bleu",
+    )
     parser.add_argument(
         "--save-file",
         default=None,
