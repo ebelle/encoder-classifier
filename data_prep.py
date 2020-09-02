@@ -8,11 +8,13 @@ from sklearn.model_selection import train_test_split
 from spacy.lang.ru import Russian
 import argparse
 from flair.models import SequenceTagger
-from flair.data import Sentence
+from flair.data import Sentence, Token
+import time
+from utils import epoch_time
 
 
 def clean_and_tok(line, tokenizer):
-
+    line = line.strip()
     # put a space between punctuation that comes after more than one letter (not abbreviations)
     line = re.sub('([.,!?":;])', r" \1", line)
     line = re.sub(r"(?<!\s)\(", r" (", line)
@@ -69,11 +71,12 @@ def limit_length(src_list, trg_list=None, max_len=None, min_len=None):
 
 def get_tags(line, tagger):
     # join list for tagging
-    line = " ".join(line)
-    line = Sentence(line)
-    tagger.predict(line)
+    sentence = Sentence()
+    for token in line:
+        sentence.add_token(Token(token))
+    tagger.predict(sentence)
     # split to get tags
-    tagged_line = line.to_tagged_string().split()
+    tagged_line = sentence.to_tagged_string().split()
     tags = []
     # tags are every other token in sentence
     for i in range(1, len(tagged_line), 2):
@@ -98,7 +101,7 @@ def prep_trans_files(
             else:
                 # keep all the data
                 keep_indices.append((i, len_line))
-            sink.write(" ".join(line))
+            sink.write(" ".join(line)+'\n')
     with open(os.path.join(save_path, "temp_trg.txt"), "w") as sink:
         total_length = sum(1 for _ in open(trg_file, "r"))
         for i in range(total_length):
@@ -106,7 +109,7 @@ def prep_trans_files(
             line, len_line = clean_and_tok(line, trg_tok)
             if max_len or min_len:
                 y.append((i, len_line))
-            sink.write(" ".join(line))
+            sink.write(" ".join(line)+'\n')
     assert len(X) == len(y)
     print(f"Total number of examples {len(X)}")
     if max_len or min_len:
@@ -119,27 +122,29 @@ def prep_tag_files(
     src_file, save_path, src_tok, max_len, min_len,
 ):
     tagger = SequenceTagger.load("pos-fast")
-    keep_indices = []
+    good_len_sentences = 0
     # save data to temporary file
     with open(os.path.join(save_path, "temp_src.txt"), "w") as src_sink:
         with open(os.path.join(save_path, "temp_trg.txt"), "w") as trg_sink:
             total_length = sum(1 for _ in open(src_file, "r"))
+            print(f"total number of lines: {total_length}")
+            start_time = time.time()
             for i in range(total_length):
+                if i != 0 and i % 10000 == 0:
+                    end_time = time.time()
+                    epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+                    print(f"Line {i}| Time: {epoch_mins}m {epoch_secs}s")
+                    start_time = time.time()
                 line = linecache.getline(src_file, i + 1)
                 line, len_line = clean_and_tok(line, src_tok)
                 if max_len or min_len:
                     if len_line >= min_len and len_line <= max_len:
-                        keep_indices.append((i, len_line))
-                        src_sink.write(" ".join(line))
-                        trg_sink.write(" ".join(get_tags(line, tagger=tagger))+'\n')
-                else:
-                    # keep all the data
-                    keep_indices.append((i, len_line))
-                    src_sink.write(" ".join(line))
-                    trg_sink.write(" ".join(get_tags(line, tagger=tagger))+'\n')
+                        good_len_sentences += 1
+                        src_sink.write(" ".join(line) + "\n")
+                        trg_sink.write(" ".join(get_tags(line, tagger=tagger)) + "\n")
+
+    keep_indices = [i for i in range(good_len_sentences)]
     print(f"Total number of examples {len(keep_indices)}")
-
-
     return keep_indices
 
 
@@ -147,12 +152,11 @@ def split_to_tsv(split, X, save_path):
     fields = ["src", "trg"]
     src = os.path.join(save_path, "temp_src.txt")
     trg = os.path.join(save_path, "temp_trg.txt")
-    source = [linecache.getline(src, i+1).strip() for i in X]
-    target = [linecache.getline(trg, i+1).strip() for i in X]
+    source = [linecache.getline(src, i + 1).strip() for i in X]
+    target = [linecache.getline(trg, i + 1).strip() for i in X]
     with open(os.path.join(save_path, f"{split}.tsv"), "w") as sink:
         csv_writer = csv.writer(sink, delimiter="\t")
-        if split == "train":
-            csv_writer.writerow(fields)
+        csv_writer.writerow(fields)
         csv_writer.writerows(zip(source, target))
 
 
@@ -197,7 +201,7 @@ def main(args):
             max_len=args.max_len,
             min_len=args.min_len,
         )
-    if args.task == "tagging":
+    elif args.task == "tagging":
         indices = prep_tag_files(
             args.src_file,
             args.save_path,
@@ -208,9 +212,6 @@ def main(args):
 
     train, indices, = train_test_split(indices, test_size=0.3, random_state=42)
     valid, test = train_test_split(indices, test_size=0.5, random_state=42)
-
-    # free up some memory by deleting unnecessary variables
-    del indices
 
     split_to_tsv("train", train, args.save_path)
     split_to_tsv("test", test, args.save_path)

@@ -27,13 +27,17 @@ class BucketBatchSampler(Sampler):
             else:
                 batch_map[length].append(idx)
         # split indices into batches of equal size
+        ordered_indices = []
         batch_list = []
         for length, indices in batch_map.items():
-            for group in [
-                indices[i : (i + self.batch_size)]
-                for i in range(0, len(indices), self.batch_size)
+            for idx in indices:
+                ordered_indices.append(idx)
+        for group in [
+            ordered_indices[i : (i + self.batch_size)]
+            for i in range(0, len(ordered_indices), self.batch_size)
             ]:
-                batch_list.append(group)
+            batch_list.append(group)
+
         return batch_list
 
     def batch_count(self):

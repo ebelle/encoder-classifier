@@ -36,7 +36,6 @@ def load_all_data(SRC, TRG, data_path, source, target):
     return train, valid, test
 
 
-# TODO: add in target vectors option
 def main(args):
 
     if args.task == "translation":
@@ -64,7 +63,7 @@ def main(args):
 
     elif args.task == "tagging":
         SRC = Field()
-        TRG = Field(unk_token=None)
+        TRG = Field(pad_token=None,unk_token=None)
 
         train, valid, test = load_all_data(
             SRC, TRG, args.data_path, args.source_name, args.target_name
@@ -133,7 +132,7 @@ if __name__ == "__main__":
         "--baseline",
         default=False,
         action="store_true",
-        help="Do not get counts and baseline for tags",
+        help="Get counts and baseline for tags",
     )
 
     main(parser.parse_args())

@@ -13,49 +13,65 @@ class Encoder(nn.Module):
         enc_dropout,
         bidirectional,
         pad_idx,
+        repr_layer,
     ):
         super().__init__()
 
         self.enc_hid_dim = enc_hid_dim
         self.num_layers = num_layers
         self.bidirectional = bidirectional
+        self.repr_layer = repr_layer
 
         # Embedding layer
         self.enc_embedding = nn.Embedding(
             input_dim, emb_dim, padding_idx=pad_idx, sparse=True
         )
+        
+        if self.repr_layer == 'rnn1':
+            #  LSTM
+            self.rnn = nn.LSTM(
+                emb_dim,
+                enc_hid_dim,
+                num_layers=1,
+                bidirectional=bidirectional,
+            )
 
-        #  LSTM
-        self.rnn = nn.LSTM(
-            emb_dim,
-            enc_hid_dim,
-            num_layers=num_layers,
-            dropout=enc_dropout if num_layers > 1 else 0,
-            bidirectional=bidirectional,
-        )
+        elif self.repr_layer == 'whole_encoder':
+            #  LSTM
+            self.rnn = nn.LSTM(
+                emb_dim,
+                enc_hid_dim,
+                num_layers=num_layers,
+                dropout=enc_dropout if num_layers > 1 else 0,
+                bidirectional=bidirectional,
+            )
 
         self.dropout = nn.Dropout(enc_dropout)
 
     def forward(self, x, input_lengths):
         # Convert input_sequence to embeddings
         x = self.dropout(self.enc_embedding(x))
-        # Pack the sequence of embeddings
-        x = nn.utils.rnn.pack_padded_sequence(x, input_lengths)
 
-        # Run packed embeddings through the RNN, and then unpack the sequences
-        x = self.rnn(x)[0]
+        if self.repr_layer != 'embedding':
+            # Pack the sequence of embeddings
+            x = nn.utils.rnn.pack_padded_sequence(x, input_lengths)
 
-        x = nn.utils.rnn.pad_packed_sequence(x)[0]
-        # outputs = [src len, batch size, hid dim * num directions]
+            # Run packed embeddings through the RNN
+            # We don't need the hidden or cell so we don't return them
+            x = self.rnn(x)[0]
 
-        # The ouput of a RNN has shape (seq_len, batch, hidden_size * num_directions)
-        # Because the Encoder is bidirectional, combine the results from the forward
-        # and reverse
-        if self.bidirectional:
-            # outputs = [src len, batch size, hid dim]
-            x = x[:, :, : self.enc_hid_dim] + x[:, :, self.enc_hid_dim :]
+            # unpack
+            x = nn.utils.rnn.pad_packed_sequence(x)[0]
+            # outputs = [src len, batch size, hid dim * num directions]
 
-        # hidden = [n layers * num directions, batch size, hid dim]
+            # The ouput of a RNN has shape (seq_len, batch, hidden_size * num_directions)
+            # Because the Encoder is bidirectional, combine the results from the forward
+            # and reverse
+            if self.bidirectional:
+                # outputs = [src len, batch size, hid dim]
+                x = x[:, :, :self.enc_hid_dim] + x[:, :, self.enc_hid_dim:]
+
+            # hidden = [n layers * num directions, batch size, hid dim]
         return x
 
 
@@ -69,12 +85,17 @@ class Decoder(nn.Module):
         dec_dropout,
         bidirectional,
         pad_idx,
+        emb_dim,
+        repr_layer,
     ):
         super().__init__()
 
         self.dec_layers = dec_layers
         self.dropout = nn.Dropout(dec_dropout)
-        self.hidden_layer1 = nn.Linear(enc_hid_dim, dec_hid_dim)
+        if repr_layer == 'embedding':
+            self.hidden_layer1 = nn.Linear(emb_dim, dec_hid_dim)
+        else:
+            self.hidden_layer1 = nn.Linear(enc_hid_dim, dec_hid_dim)
         if self.dec_layers == 2:
             self.hidden_layer2 = nn.Linear(dec_hid_dim, dec_hid_dim)
         self.final_out = nn.Linear(dec_hid_dim, output_dim)
@@ -106,6 +127,7 @@ class Tagger(nn.Module):
         dec_dropout,
         bidirectional,
         pad_idx,
+        repr_layer,
         new_state_dict=None,
     ):
         super().__init__()
@@ -118,6 +140,7 @@ class Tagger(nn.Module):
             enc_dropout,
             bidirectional,
             pad_idx,
+            repr_layer,
         )
         if new_state_dict:
             # load data from pre-trained encoder
@@ -131,6 +154,8 @@ class Tagger(nn.Module):
             dec_dropout,
             bidirectional,
             pad_idx,
+            emb_dim,
+            repr_layer,
         )
 
     def forward(self, src, src_len):

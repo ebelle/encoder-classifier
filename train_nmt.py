@@ -55,6 +55,8 @@ def main(args):
     training_set = LazyDataset(train_path, SRC, TRG, "translation")
 
     train_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
+    # number of batches comes from the sampler, not the iterator
+    num_batches = train_batch_sampler.num_batches
 
     # build dictionary of parameters for the Dataloader
     train_loader_params = {
@@ -104,7 +106,7 @@ def main(args):
         best_valid_loss = float("inf")
 
     else:
-        model_dict = torch.load(args.continue_model)
+        model_dict = torch.load(args.continue_model,map_location=torch.device('cpu'))
         prev_state_dict = model_dict["model_state_dict"]
         prev_param_dict = get_prev_params(prev_state_dict)
         dropout = model_dict["dropout"]
@@ -143,6 +145,7 @@ def main(args):
     print(model)
     print(f"The model has {count_parameters(model):,} trainable parameters")
 
+    SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
     TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
 
@@ -162,17 +165,37 @@ def main(args):
             start_time=start_time,
             save_path=args.save_path,
             dropout=args.dropout,
+            pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
             teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
+            num_batches=num_batches,
         )
         loss_history += batch_loss
+        end_time = time.time()
+        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+
+        model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
+        adam, sparse_adam = optimizer.return_optimizers()
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "adam_state_dict": adam.state_dict(),
+                "sparse_adam_state_dict": sparse_adam.state_dict(),
+                "loss": train_loss,
+                "dropout": args.dropout,
+            },
+            model_filename,
+        )
+        
         # optionally validate
         if not args.skip_validate:
 
             valid_path = os.path.join(args.data_path, "valid.tsv")
             valid_set = LazyDataset(valid_path, SRC, TRG, "translation")
             valid_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
-
+            num_batches = valid_batch_sampler.num_batches
+            
             valid_loader_params = {
                 # since bucket sampler returns batch, batch_size is 1
                 "batch_size": 1,
@@ -191,29 +214,13 @@ def main(args):
             valid_loss = evaluate_model(
                 model,
                 valid_iterator,
+                num_batches=valid_num_batches,
                 task="translation",
                 optimizer=optimizer,
                 criterion=criterion,
                 teacher_forcing=args.teacher_forcing,
                 device=device,
-            )
-
-            end_time = time.time()
-
-            epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-
-            model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
-            adam, sparse_adam = optimizer.return_optimizers()
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "adam_state_dict": adam.state_dict(),
-                    "sparse_adam_state_dict": sparse_adam.state_dict(),
-                    "loss": valid_loss,
-                    "dropout": args.dropout,
-                },
-                model_filename,
+                pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
             )
 
             if valid_loss < best_valid_loss:
@@ -241,29 +248,11 @@ def main(args):
             )
 
         else:
-            end_time = time.time()
-
-            epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-
-            # save models each epoch
-            model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
-            adam, sparse_adam = optimizer.return_optimizers()
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "adam_state_dict": adam.state_dict(),
-                    "sparse_adam_state_dict": sparse_adam.state_dict(),
-                    "loss": train_loss,
-                    "dropout": args.dropout,
-                },
-                model_filename,
-            )
-
             print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
+
     if args.loss_plot:
         make_loss_plot(loss_history)
 

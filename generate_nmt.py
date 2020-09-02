@@ -17,46 +17,6 @@ from queue import PriorityQueue
 import functools
 
 
-def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
-
-    model.eval()
-
-    with torch.no_grad():
-        batch_size = source.shape[1]
-
-        # tensor to store decoder outputs
-        decoded_batch = torch.zeros((batch_size, max_len))
-
-        # encoder_outputs is all hidden states of the input sequence, back and forwards
-        # hidden is the final forward and backward hidden states, passed through a linear layer
-        encoder_outputs, hidden, cell = model.encoder(source, src_len)
-
-        mask = model.create_mask(source)
-
-        # free up memory
-        del source, src_len
-        # first input is the init_token
-        trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
-        decoder_input = torch.LongTensor([[trg_init] for _ in range(batch_size)]).to(
-            device
-        )
-
-        # [bsz,1] -> [bsz]
-        decoder_input = decoder_input.squeeze(1)
-
-        for t in range(max_len):
-
-            decoder_output, hidden, cell = model.decoder(
-                decoder_input, hidden, cell, encoder_outputs, mask
-            )
-            # get most likely predicted token
-            # it will also be the input at the next step
-            decoder_input = decoder_output.data.topk(1)[1].view(-1)
-            # speed up processing by moving to cpu
-            decoded_batch[:, t] = decoder_input.cpu()
-
-    return decoded_batch
-
 
 def preds_to_toks(preds, vocab_field, min_len=5):
 
@@ -238,6 +198,45 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
             decoded_batch.append(preds[0])
     return decoded_batch
 
+def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
+
+    model.eval()
+
+    with torch.no_grad():
+        batch_size = source.shape[1]
+
+        # tensor to store decoder outputs
+        decoded_batch = torch.zeros((batch_size, max_len))
+
+        # encoder_outputs is all hidden states of the input sequence, back and forwards
+        # hidden is the final forward and backward hidden states, passed through a linear layer
+        encoder_outputs, hidden, cell = model.encoder(source, src_len)
+
+        mask = model.create_mask(source)
+
+        # free up memory
+        del source, src_len
+        # first input is the init_token
+        trg_init = trg_vocab.vocab.stoi[trg_vocab.init_token]
+        decoder_input = torch.LongTensor([[trg_init] for _ in range(batch_size)]).to(
+            device
+        )
+
+        # [bsz,1] -> [bsz]
+        decoder_input = decoder_input.squeeze(1)
+
+        for t in range(max_len):
+
+            decoder_output, hidden, cell = model.decoder(
+                decoder_input, hidden, cell, encoder_outputs, mask
+            )
+            # get most likely predicted token
+            # it will also be the input at the next step
+            decoder_input = decoder_output.data.topk(1)[1].view(-1)
+            # speed up processing by moving to cpu
+            decoded_batch[:, t] = decoder_input.cpu()
+
+    return decoded_batch
 
 def main(args):
 
@@ -303,7 +302,7 @@ def main(args):
     final_preds = []
     final_targets = []
     for i, batch in enumerate(test_iterator):
-        source, target_indicies, src_len = prep_eval_batch(batch, device)
+        source, target_indicies, src_len = prep_eval_batch(batch, device,TRG.vocab.stoi[TRG.pad_token])
         # get targets from file
         final_targets += [get_target(test_path, idx) for idx in target_indicies]
 
@@ -318,7 +317,7 @@ def main(args):
             preds = preds.numpy().astype(int)
             final_preds += preds_to_toks(preds, TRG)
 
-        if i % 5 == 0:
+        if i % int(len(test_iterator)/100) == 0:
             end_time = time.time()
             epoch_mins, epoch_secs = epoch_time(start_time, end_time)
             print(f" batch {i} |Time: {epoch_mins}m {epoch_secs}s")
@@ -329,10 +328,7 @@ def main(args):
         writer = csv.writer(sink, delimiter="\t")
         writer.writerows(zip(final_preds, final_targets))
 
-    if args.bleu == "sacrebleu":
-        final_preds = [final_preds]
-        print(sacrebleu.corpus_bleu(final_targets, final_preds).score)
-    elif args.bleu == "torch_bleu":
+    if not args.no_bleu:
         final_preds = [p.split() for p in final_preds]
         final_targets = [[t.split()] for t in final_targets]
         print(bleu_score(final_preds, final_targets))
@@ -354,10 +350,10 @@ if __name__ == "__main__":
         help="decoder method. choices are beam or greedy",
     )
     parser.add_argument(
-        "--bleu",
-        default="torch_bleu",
-        choices=["sacrebleu", "torch_bleu"],
-        help="bleu score. choices are sacrebleu and torch_bleu",
+        "--no-bleu",
+        default=False,
+        action='store_true',
+        help="do not compute BLEU",
     )
     parser.add_argument(
         "--save-file",

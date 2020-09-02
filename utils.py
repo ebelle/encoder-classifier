@@ -20,28 +20,30 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def prep_batch(batch, device):
+def prep_batch(batch, device,pad_indices):
     """pad source and target sequences and send to device"""
 
+    src_pad_idx = pad_indices[0]
+    trg_pad_idx = pad_indices[1]
     source, targets, src_len = batch
     # pad source and target sequences
     source = pad_sequence(
-        [torch.LongTensor(s) for s in source], batch_first=False, padding_value=0
+        [torch.LongTensor(s) for s in source], batch_first=False, padding_value=src_pad_idx
     ).to(device)
     targets = pad_sequence(
-        [torch.LongTensor(t) for t in targets], batch_first=False, padding_value=0
+        [torch.LongTensor(t) for t in targets], batch_first=False, padding_value=trg_pad_idx
     ).to(device)
     src_len = torch.LongTensor(src_len).to(device)
     return source, targets, src_len
 
 
-def prep_eval_batch(batch, device):
+def prep_eval_batch(batch, device,trg_pad_idx):
     """pad source sequence. target stays as indexes of lines in file"""
 
     source, trg_indices, src_len = batch
     # pad source and target sequences
     source = pad_sequence(
-        [torch.LongTensor(s) for s in source], batch_first=False, padding_value=0
+        [torch.LongTensor(s) for s in source], batch_first=False, padding_value=trg_pad_idx
     ).to(device)
 
     src_len = torch.LongTensor(src_len).to(device)
@@ -104,7 +106,7 @@ def make_muliti_optim(
 
 
 def get_prev_params(prev_state_dict):
-    # gather parameters from pre-trained model
+    """gather parameters from pre-trained model"""
 
     # create dict to store paramaters
     prev_param_dict = {}
@@ -112,9 +114,12 @@ def get_prev_params(prev_state_dict):
     prev_param_dict["emb_dim"] = prev_state_dict["encoder.enc_embedding.weight"].shape[
         1
     ]
-    prev_param_dict["enc_hid_dim"] = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[
-        1
-    ]
+    if "encoder.rnn.weight_hh_l0" in prev_state_dict:
+        prev_param_dict["enc_hid_dim"] = prev_state_dict["encoder.rnn.weight_hh_l0"].shape[
+            1
+        ]
+    else:
+        prev_param_dict["enc_hid_dim"] = None
 
     # for NMT
     if "decoder.rnn.weight_hh_l0" in prev_state_dict:
@@ -146,7 +151,7 @@ def get_prev_params(prev_state_dict):
             prev_param_dict["enc_layers"] = 1
 
     # for tagger, check for 2nd layer in decoder
-    if "decoder.hidden_layer2" in prev_state_dict:
+    if "decoder.hidden_layer2.weight" in prev_state_dict:
         prev_param_dict["dec_layers"] = 2
     else:
         prev_param_dict["dec_layers"] = 1
@@ -163,10 +168,9 @@ def process_line(line, vocab_field, init_eos=False):
 
 
 def get_best_loss(models_folder):
-    glob_folder = os.path.join(models_folder, "*")
-    len_folder = len(models_folder) + 1
+    glob_folder = os.path.join(models_folder, "**/*.pt")
     losses = {}
-    for model in glob.glob(glob_folder):
+    for model in glob.glob(glob_folder,recursive=True):
         loss = round(torch.load(model)["loss"], 4)
-        losses[model[len_folder:]] = loss
+        losses[model] = loss
     print({k: v for k, v in sorted(losses.items(), key=lambda item: item[1])})

@@ -34,10 +34,10 @@ def top_predictions(preds):
     return max_preds
 
 
-def categorical_accuracy(preds, tags, tag_pad_idx, tag_unk_idx):
+def categorical_accuracy(preds, tags, tag_pad_idx):
     # Returns percent correct per batch
     # return non-zero, non-pad elements
-    non_pad_elements = torch.nonzero(tags != tag_pad_idx or tag_unk_idx, as_tuple=True)
+    non_pad_elements = torch.nonzero(tags != tag_pad_idx, as_tuple=True)
     preds = preds[non_pad_elements]
     tags = tags[non_pad_elements]
     # the overlap between predictions and tags
@@ -46,29 +46,38 @@ def categorical_accuracy(preds, tags, tag_pad_idx, tag_unk_idx):
     correct = correct.sum().item()
     total_nonzero_targets = tags.shape[0]
     percent_correct = correct / total_nonzero_targets
-
     return percent_correct, preds, tags
 
 
 def get_tag_dict(target_vocab):
     names = {}
-    # skip the pad token
-    for i in range(1, len(target_vocab.vocab)):
+    for i in range(len(target_vocab.vocab)):
         names[i] = target_vocab.vocab.itos[i]
     return names
 
 
-def idx_to_tag(preds, source, trg_vocab, src_vocab, trg_pad_idx, src_pad_idx):
-    # make source horizontal
+def idx_to_tag(preds, source, src_len, trg_vocab, src_vocab, trg_pad_idx, src_pad_idx):
+    """takes in the source and predictions and returns them as a string of tokens"""
+
+    # make source and preds horizontal
     source = np.rot90(source)
     preds = np.rot90(preds)
+    # cast tensor to list and reverse it to match the batch 
+    src_len = src_len.tolist()
+    src_len.reverse()
+    # get tokens and join into string
     preds = [[trg_vocab.vocab.itos[i] for i in x] for x in preds]
     source = [[src_vocab.vocab.itos[i] for i in x] for x in source]
-
+    # clip padding and join to string
+    preds = [' '.join(p[:l]) for p,l in zip(preds,src_len)]
+    source = [' '.join(s[:l]) for s,l in zip(source,src_len)]
     return preds, source
 
 
 def main(args):
+    
+    if not os.path.exists(args.save_path):
+        os.mkdir(args.save_path)
 
     # use cuda if available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -80,11 +89,11 @@ def main(args):
     input_dim = len(SRC.vocab)
     output_dim = len(TRG.vocab)
     src_pad_idx = SRC.vocab.stoi[SRC.pad_token]
-    trg_pad_idx = TRG.vocab.stoi[TRG.pad_token]
-    trg_unk_idx = TRG.vocab.stoi[TRG.unk_index]
+    trg_pad_idx = len(TRG.vocab)+1
 
-    prev_state_dict = torch.load(args.pretrained_model)
-    enc_dropout, dec_dropout = torch.load(args.pretrained_model)["dropout"]
+    prev_state_dict = torch.load(args.pretrained_model,map_location=torch.device('cpu'))
+    enc_dropout, dec_dropout = prev_state_dict["dropout"]
+    repr_layer = prev_state_dict["repr_layer"]
 
     prev_state_dict = prev_state_dict["model_state_dict"]
 
@@ -103,6 +112,7 @@ def main(args):
         dec_dropout,
         prev_param_dict["bidirectional"],
         src_pad_idx,
+        repr_layer,
     ).to(device)
 
     model.load_state_dict(prev_state_dict)
@@ -111,7 +121,8 @@ def main(args):
     test_set = LazyDataset(test_path, SRC, TRG, "tagging")
 
     test_batch_sampler = BucketBatchSampler(test_path, args.batch_size)
-
+    num_batches = test_batch_sampler.num_batches
+    ten_checkpoints = np.linspace(0,num_batches,num=10,dtype=int)
     # build dictionary of parameters for the Dataloader
     test_loader_params = {
         # since bucket sampler returns batch, batch_size is 1
@@ -132,44 +143,38 @@ def main(args):
     accuracies = []
     final_predictons = []
     final_targets = []
-    if args.save_file:
+    if args.save_path:
         # optionally save results to file
-        sink = open(args.save_file, "w")
+        sink = open(os.path.join(args.save_path,'tagged.tsv'),"w",encoding="utf-8")
         writer = csv.writer(sink, delimiter="\t")
-        print(len(test_iterator))
     for i, batch in enumerate(test_iterator):
-        source, targets, src_len = prep_batch(batch, device)
+        source, targets, src_len = prep_batch(batch, device,(src_pad_idx,trg_pad_idx))
         # targets don't need to be on the gpu
         targets = targets.cpu()
         predictions = model_forward(source, src_len, model, device)
         predictions = top_predictions(predictions)
-        if args.save_file:
+        if args.save_path:
             source = source.cpu()
             tok_preds, tok_source = idx_to_tag(
-                predictions, source, TRG, SRC, trg_pad_idx, src_pad_idx
+                predictions, source, src_len, TRG, SRC, trg_pad_idx, src_pad_idx
             )
             writer.writerows(zip(tok_source, tok_preds))
         acc, predictions, targets = categorical_accuracy(
-            predictions, targets, trg_pad_idx, trg_unk_idx
+            predictions, targets, trg_pad_idx
         )
         accuracies.append(acc)
         final_predictons += predictions
         final_targets += targets
 
-        if i % 10000 == 0:
-            end_time = time.time()
-            epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-            print(f" batch {i} |Time: {epoch_mins}m {epoch_secs}s")
-            start_time = end_time
-    print(mean(accuracies))
-    print(classification_report(final_predictons, final_targets))
+    print(f'The categorical accuracy for {args.pretrained_model} model is: {mean(accuracies):.4f}')
 
     tag_names = get_tag_dict(TRG)
     confusion_matrix_df = pd.DataFrame(
         confusion_matrix(final_predictons, final_predictons)
     ).rename(columns=tag_names, index=tag_names)
-    seaborn.heatmap(confusion_matrix_df)
-    plt.show()
+    cm = seaborn.heatmap(confusion_matrix_df)
+    fig = cm.get_figure()
+    fig.savefig(os.path.join(args.save_path,'confusion_matrix.png'))
 
 
 if __name__ == "__main__":
@@ -182,9 +187,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument("--pretrained-model", help="filename of pretrained model")
     parser.add_argument(
-        "--save-file",
+        "--save-path",
         default=None,
-        help="optional filename for saving translated sentences",
+        help="optional folder for saving output",
     )
-
     main(parser.parse_args())

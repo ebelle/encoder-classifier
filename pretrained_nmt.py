@@ -11,19 +11,11 @@ from torch import optim
 import matplotlib.pyplot as plt
 
 from lazy_dataset import LazyDataset
-from bucket_sampler import BucketBatchSampler
-from tagger import Tagger
+from lstm import Seq2Seq
 from train import train_model
 from evaluate import evaluate_model
-from utils import (
-    random_init_weights,
-    count_parameters,
-    epoch_time,
-    sort_batch,
-    get_prev_params,
-    make_muliti_optim,
-)
-
+from utils import *
+from bucket_sampler import BucketBatchSampler
 
 def make_encoder_dict(prev_state_dict):
 
@@ -37,23 +29,21 @@ def make_encoder_dict(prev_state_dict):
             new_state_dict[new_k] = v
     return new_state_dict
 
-
-def make_loss_plot(model_history,save_path,epochs):
-    fig, ax = plt.subplots()
+def make_loss_plot(model_history):
+    ax = plt.subplot(111)
     # Hide the right and top spines
     ax.spines["right"].set_visible(False)
     ax.spines["top"].set_visible(False)
     ax.plot(
         list(range(1, len(model_history) + 1)), model_history, label="training loss"
     )
-    plt.xlabel("epochs", fontsize=14)
+    plt.xlabel("batch", fontsize=16)
     plt.ylabel("training loss", fontsize=14)
-    ax.set_title("Training Loss", fontsize=14)
-    epoch_list = [i for i in [i+1 for i in range(epochs)] if i % 10 == 0]
-    spacing = [i*9 for i in epoch_list ]
-    plt.xticks(spacing,labels=epoch_list)
+    ax.set_title("Training Loss", fontsize=20, pad=40)
+    plt.xticks(list(range(100, len(model_history) + 1, 100)))
     plt.legend()
-    fig.savefig(os.path.join(save_path,'loss_plt.png'))
+    plt.show()
+
 
 def main(args):
 
@@ -64,17 +54,17 @@ def main(args):
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
 
-    SRC = torch.load(os.path.join(args.nmt_data_path, "src_vocab.pt"))
+    SRC = torch.load(os.path.join(args.data_path, "src_vocab.pt"))
     TRG = torch.load(os.path.join(args.data_path, "trg_vocab.pt"))
 
     # gather parameters from the vocabulary
     input_dim = len(SRC.vocab)
     output_dim = len(TRG.vocab)
-    pad_idx = SRC.vocab.stoi[SRC.pad_token]
+    src_pad_idx = SRC.vocab.stoi[SRC.pad_token]
 
     # create lazydataset and data loader
     train_path = os.path.join(args.data_path, "train.tsv")
-    training_set = LazyDataset(train_path, SRC, TRG, "tagging")
+    training_set = LazyDataset(train_path, SRC, TRG, "translation")
 
     train_batch_sampler = BucketBatchSampler(train_path, args.batch_size)
     # number of batches comes from the sampler, not the iterator
@@ -95,78 +85,52 @@ def main(args):
 
     train_iterator = torch.utils.data.DataLoader(training_set, **train_loader_params)
 
-    # load pretrained-model
-    prev_state_dict = torch.load(args.pretrained_model,map_location=torch.device('cpu'))
-    enc_dropout = prev_state_dict["dropout"]
-    prev_state_dict = prev_state_dict["model_state_dict"]
-
-    # gather parameters except dec_hid_dim since tagger gets this from args
+    model_dict = torch.load(args.pretrained_model,map_location=torch.device('cpu'))
+    prev_state_dict = model_dict["model_state_dict"]
     prev_param_dict = get_prev_params(prev_state_dict)
 
-    new_state_dict = make_encoder_dict(prev_state_dict)
+    # get encoder weights only
+    new_state_dict =  make_encoder_dict(prev_param_dict)
 
-    if args.repr_layer == 'embedding':
-        new_dict = {}
-        # add embedding layer
-        new_dict['enc_embedding.weight'] = new_state_dict['enc_embedding.weight']
-        # replace state dict with new dict
-        new_state_dict = new_dict
-    elif args.repr_layer == 'rnn1':
-        new_dict = {}
-        # add embedding layer
-        new_dict['enc_embedding.weight'] = new_state_dict['enc_embedding.weight']
-        # add first layer weights and bias 
-        for k,v in new_state_dict.items():
-            if "l0" in k:
-                new_dict[k] = v
-        # replace state dict with new dict
-        new_state_dict = new_dict
-
-
-    model = Tagger(
-        new_state_dict=new_state_dict,
-        input_dim=input_dim,
-        emb_dim=prev_param_dict["emb_dim"],
-        enc_hid_dim=prev_param_dict["enc_hid_dim"],
-        dec_hid_dim=args.hid_dim,
-        output_dim=output_dim,
-        enc_layers=prev_param_dict["enc_layers"],
-        dec_layers=args.n_layers,
-        enc_dropout=enc_dropout,
-        dec_dropout=args.dropout,
-        bidirectional=prev_param_dict["bidirectional"],
-        pad_idx=pad_idx,
-        repr_layer = args.repr_layer,
+    # get encoder dropout
+    dropout = model_dict["dropout"][0]
+    dropout = args.dropout
+    model = Seq2Seq(
+        input_dim,
+        prev_param_dict["emb_dim"],
+        prev_param_dict["enc_hid_dim"],
+        output_dim,
+        prev_param_dict["enc_layers"],
+        dropout,
+        prev_param_dict["bidirectional"],
+        src_pad_idx,
+        device,
+        new_state_dict,
     ).to(device)
-
-    # optionally randomly initialize weights
-    if args.random_init:
-        model.apply(random_init_weights)
+    
+    del prev_param_dict, new_state_dict
+    # freeze encoder
+    for param in model.encoder.parameters():
+        param.requires_grad = False
 
     print(model)
     print(f"The model has {count_parameters(model):,} trainable parameters")
 
+    SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
+    TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
+    criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
     optimizer = make_muliti_optim(model.named_parameters(), args.learning_rate)
 
-    if args.unfreeze_encoder == False:
-        for param in model.encoder.parameters():
-            param.requires_grad = False
-
-    SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
-    TRG_PAD_IDX = len(TRG.vocab)+1
-    criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
-
-    best_valid_loss = float("inf")
-
     # training
+    best_valid_loss = float("inf")
     batch_history = []
     epoch_history = []
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(args.epochs + 1):
         start_time = time.time()
         train_loss, batch_loss = train_model(
-            model=model,
-            iterator=train_iterator,
-            task="tagging",
+            model,
+            train_iterator,
+            task="translation",
             optimizer=optimizer,
             criterion=criterion,
             clip=args.clip,
@@ -174,41 +138,39 @@ def main(args):
             epoch=epoch,
             start_time=start_time,
             save_path=args.save_path,
+            dropout=dropout,
             pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
-            dropout=(enc_dropout, args.dropout),
+            teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
-            repr_layer=args.repr_layer,
-            num_batches = num_batches
+            num_batches=num_batches,
         )
         batch_history += batch_loss
         epoch_history.append(train_loss)
-        end_time = time.time()
-
-        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
         model_filename = os.path.join(args.save_path, f"model_epoch_{epoch}.pt")
         adam, sparse_adam = optimizer.return_optimizers()
-        if not args.only_best:
-            torch.save(
-                {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "adam_state_dict": adam.state_dict(),
-                    "sparse_adam_state_dict": sparse_adam.state_dict(),
-                    "loss": valid_loss,
-                    "dropout": (enc_dropout, args.dropout),
-                    "repr_layer": args.repr_layer,
-                },
-                model_filename,
-            )
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "adam_state_dict": adam.state_dict(),
+                "sparse_adam_state_dict": sparse_adam.state_dict(),
+                "loss": train_loss,
+                "dropout": dropout,
+            },
+            model_filename,
+        )
+        end_time = time.time()
+        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
 
         # optionally validate
         if not args.skip_validate:
+
             valid_path = os.path.join(args.data_path, "valid.tsv")
-            valid_set = LazyDataset(valid_path, SRC, TRG, "tagging")
+            valid_set = LazyDataset(valid_path, SRC, TRG, "translation")
             valid_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
-            # number of batches comes from the sampler, not the iterator
-            valid_num_batches = valid_batch_sampler.num_batches
+            num_batches = valid_batch_sampler.num_batches
+            
             valid_loader_params = {
                 # since bucket sampler returns batch, batch_size is 1
                 "batch_size": 1,
@@ -220,7 +182,6 @@ def main(args):
                 "pin_memory": True,
                 "drop_last": False,
             }
-
             valid_iterator = torch.utils.data.DataLoader(
                 valid_set, **valid_loader_params
             )
@@ -229,9 +190,10 @@ def main(args):
                 model,
                 valid_iterator,
                 num_batches=valid_num_batches,
+                task="translation",
                 optimizer=optimizer,
                 criterion=criterion,
-                task="tagging",
+                teacher_forcing=args.teacher_forcing,
                 device=device,
                 pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
             )
@@ -247,8 +209,7 @@ def main(args):
                         "adam_state_dict": adam.state_dict(),
                         "sparse_adam_state_dict": sparse_adam.state_dict(),
                         "loss": valid_loss,
-                        "dropout": (enc_dropout, args.dropout),
-                        "repr_layer": args.repr_layer,
+                        "dropout": dropout,
                     },
                     best_filename,
                 )
@@ -262,77 +223,48 @@ def main(args):
             )
 
         else:
+
             print(f"Epoch: {epoch:02} | Time: {epoch_mins}m {epoch_secs}s")
             print(
                 f"\t Train Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}"
             )
 
     if args.loss_plot:
-        make_loss_plot(batch_history,args.save_path,args.epochs)
-
+        make_loss_plot(loss_history)
 
 
 if __name__ == "__main__":
-    # hyperparameters
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nmt-data-path", help="folder where source vocab is stored")
     parser.add_argument(
-        "--pretrained-model", help="folder where pre-trained model is stored"
-    )
-    parser.add_argument(
-        "--data-path", help="folder where data and target vocab are stored"
+        "--data-path", help="folder where data and dictionaries are stored"
     )
     parser.add_argument(
         "--save-path", help="folder for saving model and/or checkpoints"
     )
+    parser.add_argument("--epochs", default=10, type=int)
+    parser.add_argument("--batch-size", default=64, type=int)
+    parser.add_argument("--num-workers", default=0, type=int)
+    parser.add_argument("--shuffle", default=False, action="store_true")
+    parser.add_argument("--dropout", default=0.5, type=float)
+    parser.add_argument("--teacher-forcing", default=0.5, type=float)
+    parser.add_argument("--clip", default=1.0, type=float)
     parser.add_argument(
-        "--repr-layer",
-        default="whole_encoder",
-        choices=["whole_encoder", "embedding", "rnn1"],
-        help="which layer to pull the representations from. default is to use the whole encoder",
+        "--learning-rate", type=float, default=1e-3, help="learning rate for optimizer"
     )
+    parser.add_argument("--checkpoint", default=None, type=int, help="save model every N batches")
     parser.add_argument(
         "--skip-validate",
         default=False,
         action="store_true",
         help="set to False to skip validation",
     )
-    parser.add_argument("--epochs", default=10, type=int)
-    parser.add_argument("--batch-size", default=64, type=int)
-    parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument(
-        "--n-layers",
-        default=1,
-        type=int,
-        choices=[1, 2],
-        help="number of tagger layers. options are 1 or 2",
+        "--pretrained-model",
+        type=str,
+        help="pretrained model for loading to encoder",
     )
-    parser.add_argument("--dropout", default=0.1, type=float)
-    parser.add_argument("--clip", default=1.0, type=float)
-    parser.add_argument(
-        "--hid-dim", default=256, type=int, help="hidden dimension for tagger",
-    )
-    parser.add_argument(
-        "--unfreeze-encoder",
-        default=False,
-        action="store_true",
-        help="optionally freeze encoder so it does not train",
-    )
-    parser.add_argument(
-        "--random-init",
-        default=False,
-        action="store_true",
-        help="randomly initialize weights",
-    )
-    parser.add_argument(
-        "--shuffle", default=False, action="store_true", help="shuffle batch",
-    )
-    parser.add_argument(
-        "--learning-rate", type=float, default=1e-4, help="learning rate for optimizer"
-    )
-    parser.add_argument("--checkpoint", type=int, help="save model every N batches")
     parser.add_argument(
         "--loss-plot", default=False, action="store_true", help="create a loss plot"
     )
-    parser.add_argument("--only-best", default=False,action="store_true",help="only save the best model")
+
     main(parser.parse_args())

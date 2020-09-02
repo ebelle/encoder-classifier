@@ -71,11 +71,10 @@ class Attention(nn.Module):
             hidden = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
             hidden = hidden.unsqueeze(0)
         hidden = torch.tanh(self.dropout(self.fc(hidden)))
-
         attn = self.dot_score(hidden, encoder_outputs)
         del (hidden, encoder_outputs)
         # Transpose max_length and batch_size dimensions
-        attn.t_()
+        attn.t_()  # [bsz,max_len]
         # Apply mask so network does not attend <pad> tokens
         attn = attn.masked_fill(mask == 0, -1e10)
         # Softmax over attention scores
@@ -119,11 +118,11 @@ class Decoder(nn.Module):
         word_input = self.dropout(self.dec_embedding(word_input))
         # word_embedded = [1, batch size, emb dim]
         # Run embedded input word and hidden through RNN
+
         word_input, (hidden, cell) = self.rnn(word_input, (hidden, cell))
         # Calculate attention from current RNN state and all encoder outputs; apply to encoder outputs
         attn = self.attention(hidden, encoder_outputs, mask)
         attn = attn.bmm(encoder_outputs.transpose(0, 1))  # B x 1 x N
-
         if self.bidirectional == True:
             word_input = (
                 word_input[:, :, : self.hid_dim] + word_input[:, :, self.hid_dim :]
@@ -151,12 +150,17 @@ class Seq2Seq(nn.Module):
         bidirectional,
         src_pad_idx,
         device,
+        new_state_dict=None,
+
     ):
         super().__init__()
 
         self.encoder = Encoder(
             input_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional, src_pad_idx
         )
+        if new_state_dict:
+            # load data from pre-trained encoder
+            self.encoder.load_state_dict(new_state_dict)
 
         self.decoder = Decoder(
             output_dim, emb_dim, hid_dim, num_layers, dropout, bidirectional,
@@ -174,7 +178,6 @@ class Seq2Seq(nn.Module):
         # src_len = [batch size]
         # trg = [trg len, batch size]
         # teacher_forcing_ratio is probability to use teacher forcing
-        # e.g. if teacher_forcing_ratio is 0.75 we use teacher forcing 75% of the time
 
         batch_size = src.shape[1]
         trg_len = trg.shape[0]
