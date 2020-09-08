@@ -9,6 +9,8 @@ import seaborn
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats
+
 
 from tagger import Tagger
 from utils import prep_batch, get_prev_params, sort_batch, epoch_time
@@ -34,19 +36,55 @@ def top_predictions(preds):
     return max_preds
 
 
-def categorical_accuracy(preds, tags, tag_pad_idx):
-    # Returns percent correct per batch
-    # return non-zero, non-pad elements
-    non_pad_elements = torch.nonzero(tags != tag_pad_idx, as_tuple=True)
-    preds = preds[non_pad_elements]
-    tags = tags[non_pad_elements]
+def get_accuracy(preds, tags, target_lenth):
     # the overlap between predictions and tags
     correct = preds.eq(tags)
     # get the sum of correct predictions as an integer
     correct = correct.sum().item()
-    total_nonzero_targets = tags.shape[0]
-    percent_correct = correct / total_nonzero_targets
-    return percent_correct, preds, tags
+    percent_correct = correct / target_lenth
+    return percent_correct
+
+
+def categorical_accuracy(source, tags, preds, src_unk_idx, tag_pad_idx):
+    # Returns percent correct per batch
+    # non-pad elements
+    non_pad_elements = torch.nonzero(tags != tag_pad_idx, as_tuple=True)
+    preds = preds[non_pad_elements]
+    tags = tags[non_pad_elements]
+    source = source[non_pad_elements]
+    total_targets = len(non_pad_elements[0])
+    non_pad_accuracy = get_accuracy(preds, tags, total_targets)
+
+    # non zero elements
+    non_zero_elements = torch.nonzero(source != src_unk_idx, as_tuple=True)
+    known_preds = preds[non_zero_elements]
+    known_tags = tags[non_zero_elements]
+    known_source = source[non_zero_elements]
+    total_known = len(non_zero_elements[0])
+    known_accuracy = get_accuracy(known_preds, known_tags, total_known)
+
+    # zero elements
+    zero_elements = torch.nonzero(source == src_unk_idx, as_tuple=True)
+    unk_preds = preds[zero_elements]
+    unk_tags = tags[zero_elements]
+    unk_source = source[zero_elements]
+    total_unk = len(zero_elements[0])
+    # return string in case of no unknowns
+    unknown_accuracy = 'none'
+    if total_unk:
+        unknown_accuracy = get_accuracy(unk_preds, unk_tags, total_unk)
+
+    return (
+        non_pad_accuracy,
+        known_accuracy,
+        unknown_accuracy,
+        preds,
+        tags,
+        known_preds,
+        known_tags,
+        unk_preds,
+        unk_tags,
+    )
 
 
 def get_tag_dict(target_vocab):
@@ -56,26 +94,36 @@ def get_tag_dict(target_vocab):
     return names
 
 
-def idx_to_tag(preds, source, src_len, trg_vocab, src_vocab, trg_pad_idx, src_pad_idx):
-    """takes in the source and predictions and returns them as a string of tokens"""
+def idx_to_tag(batch, src_len, vocabulary):
+    """takes in batch a string of tokens"""
 
-    # make source and preds horizontal
-    source = np.rot90(source)
-    preds = np.rot90(preds)
-    # cast tensor to list and reverse it to match the batch 
+    # make horizontal
+    batch = np.rot90(batch)
+    # cast tensor to list and reverse it to match the batch
     src_len = src_len.tolist()
     src_len.reverse()
+    # clip padding
+    batch = [b[:l] for b, l in zip(batch, src_len)]
     # get tokens and join into string
-    preds = [[trg_vocab.vocab.itos[i] for i in x] for x in preds]
-    source = [[src_vocab.vocab.itos[i] for i in x] for x in source]
-    # clip padding and join to string
-    preds = [' '.join(p[:l]) for p,l in zip(preds,src_len)]
-    source = [' '.join(s[:l]) for s,l in zip(source,src_len)]
-    return preds, source
+    batch = [" ".join(vocabulary.vocab.itos[i] for i in x) for x in batch]
+    return batch
+
+
+def make_confusion_matrix(preds, targs, tag_names, save_path, pic_file):
+    confusion_matrix_df = pd.DataFrame(confusion_matrix(targs, preds)).rename(
+        columns=tag_names, index=tag_names
+    )
+    cm = seaborn.heatmap(confusion_matrix_df)
+    cm.set_xlabel("Predicted")
+    cm.set_ylabel("True")
+    plt.tight_layout()
+    fig = cm.get_figure()
+    fig.savefig(os.path.join(save_path, pic_file))
+    del fig, cm, confusion_matrix_df
 
 
 def main(args):
-    
+
     if not os.path.exists(args.save_path):
         os.mkdir(args.save_path)
 
@@ -88,10 +136,13 @@ def main(args):
     # gather parameters from the vocabulary
     input_dim = len(SRC.vocab)
     output_dim = len(TRG.vocab)
+    src_unk_idx = SRC.vocab.stoi[SRC.unk_token]
     src_pad_idx = SRC.vocab.stoi[SRC.pad_token]
-    trg_pad_idx = len(TRG.vocab)+1
+    trg_pad_idx = len(TRG.vocab) + 1
 
-    prev_state_dict = torch.load(args.pretrained_model,map_location=torch.device('cpu'))
+    prev_state_dict = torch.load(
+        args.pretrained_model, map_location=torch.device("cpu")
+    )
     enc_dropout, dec_dropout = prev_state_dict["dropout"]
     repr_layer = prev_state_dict["repr_layer"]
 
@@ -122,7 +173,7 @@ def main(args):
 
     test_batch_sampler = BucketBatchSampler(test_path, args.batch_size)
     num_batches = test_batch_sampler.num_batches
-    ten_checkpoints = np.linspace(0,num_batches,num=10,dtype=int)
+    ten_checkpoints = np.linspace(0, num_batches, num=10, dtype=int)
     # build dictionary of parameters for the Dataloader
     test_loader_params = {
         # since bucket sampler returns batch, batch_size is 1
@@ -140,41 +191,83 @@ def main(args):
 
     start_time = time.time()
 
-    accuracies = []
+    non_pad_accuracy = []
+    known_accuracy = []
+    unknown_accuracy = []
     final_predictons = []
     final_targets = []
+    known_predictions = []
+    known_targets = []
+    unknown_predictions = []
+    unknown_targets = []
+
     if args.save_path:
         # optionally save results to file
-        sink = open(os.path.join(args.save_path,'tagged.tsv'),"w",encoding="utf-8")
+        sink = open(os.path.join(args.save_path, "tagged.tsv"), "w", encoding="utf-8")
         writer = csv.writer(sink, delimiter="\t")
+
     for i, batch in enumerate(test_iterator):
-        source, targets, src_len = prep_batch(batch, device,(src_pad_idx,trg_pad_idx))
+        source, targets, src_len = prep_batch(batch, device, (src_pad_idx, trg_pad_idx))
         # targets don't need to be on the gpu
         targets = targets.cpu()
         predictions = model_forward(source, src_len, model, device)
         predictions = top_predictions(predictions)
+        source = source.cpu()
         if args.save_path:
-            source = source.cpu()
-            tok_preds, tok_source = idx_to_tag(
-                predictions, source, src_len, TRG, SRC, trg_pad_idx, src_pad_idx
-            )
-            writer.writerows(zip(tok_source, tok_preds))
-        acc, predictions, targets = categorical_accuracy(
-            predictions, targets, trg_pad_idx
-        )
-        accuracies.append(acc)
+            tok_preds = idx_to_tag(predictions, src_len, TRG)
+            tok_trgs = idx_to_tag(targets, src_len, TRG)
+            tok_source = idx_to_tag(source, src_len, SRC)
+            writer.writerows(zip(tok_source, tok_trgs, tok_preds))
+        (
+            non_pad,
+            known,
+            unknown,
+            predictions,
+            targets,
+            known_preds,
+            known_tags,
+            unk_preds,
+            unk_tags,
+        ) = categorical_accuracy(source, targets, predictions, src_unk_idx, trg_pad_idx)
+        non_pad_accuracy.append(non_pad)
+        known_accuracy.append(known)
+        # we return a string if there are no unknowns
+        if isinstance(unknown,str):
+            pass
+        else:
+            unknown_accuracy.append(unknown)
         final_predictons += predictions
         final_targets += targets
-
-    print(f'The categorical accuracy for {args.pretrained_model} model is: {mean(accuracies):.4f}')
-
+        known_predictions += known_preds
+        known_targets += known_tags
+        unknown_predictions += unk_preds
+        unknown_targets += unk_tags
+    print(
+        f"Model: {args.pretrained_model} | total accuracy: {mean(non_pad_accuracy):.4f} | known accuracy: {mean(known_accuracy):.4f} | unknown accuracy: {mean(unknown_accuracy):.4f}"
+    )
     tag_names = get_tag_dict(TRG)
-    confusion_matrix_df = pd.DataFrame(
-        confusion_matrix(final_predictons, final_predictons)
-    ).rename(columns=tag_names, index=tag_names)
-    cm = seaborn.heatmap(confusion_matrix_df)
-    fig = cm.get_figure()
-    fig.savefig(os.path.join(args.save_path,'confusion_matrix.png'))
+    # unknown cf
+    """make_confusion_matrix(
+        unknown_predictions,
+        unknown_targets,
+        tag_names,
+        args.save_path,
+        "unknown_matrix.png",
+    )"""
+    # total cf
+    make_confusion_matrix(
+        final_predictons,
+        final_targets,
+        tag_names,
+        args.save_path,
+        "confusion_matrix.png",
+    )
+    # known cf
+
+    """make_confusion_matrix(
+        known_predictions, known_targets, tag_names, args.save_path, "known_matrix.png"
+    )"""
+    
 
 
 if __name__ == "__main__":
@@ -187,8 +280,6 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", default=0, type=int)
     parser.add_argument("--pretrained-model", help="filename of pretrained model")
     parser.add_argument(
-        "--save-path",
-        default=None,
-        help="optional folder for saving output",
+        "--save-path", default=None, help="optional folder for saving output",
     )
     main(parser.parse_args())

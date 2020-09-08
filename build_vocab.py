@@ -63,7 +63,7 @@ def main(args):
 
     elif args.task == "tagging":
         SRC = Field()
-        TRG = Field(pad_token=None,unk_token=None)
+        TRG = Field(pad_token=None, unk_token=None)
 
         train, valid, test = load_all_data(
             SRC, TRG, args.data_path, args.source_name, args.target_name

@@ -69,16 +69,16 @@ def train_model(
     model.train()
     epoch_loss = 0
     batch_loss = []
-    if task == 'tagging':
+    if task == "tagging":
         # save 10 times throughout training
-        save_loss = np.linspace(0,num_batches,num=10,dtype=int)
-    elif task == 'translation':
+        save_loss = np.linspace(0, num_batches, num=10, dtype=int)
+    elif task == "translation":
         # save 100 times throughout training
-        save_loss = np.linspace(0,num_batches,num=100,dtype=int)
+        save_loss = np.linspace(0, num_batches, num=100, dtype=int)
 
     try:
         for i, batch in enumerate(iterator):
-            source, targets, src_len = prep_batch(batch, device,pad_indices)
+            source, targets, src_len = prep_batch(batch, device, pad_indices)
             optimizer.zero_grad()
             loss = train_step(
                 model,
@@ -116,7 +116,7 @@ def train_model(
                             "sparse_adam_state_dict": sparse_adam.state_dict(),
                             "loss": loss,
                             "dropout": dropout,
-                            "repr_layer":repr_layer,
+                            "repr_layer": repr_layer,
                         },
                         os.path.join(save_path, f"checkpoint_{epoch}_{i}.pt"),
                     )

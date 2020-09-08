@@ -6,6 +6,7 @@ import spacy
 import re
 from sklearn.model_selection import train_test_split
 from spacy.lang.ru import Russian
+from cltk.tokenize.word import WordTokenizer
 import argparse
 from flair.models import SequenceTagger
 from flair.data import Sentence, Token
@@ -101,7 +102,7 @@ def prep_trans_files(
             else:
                 # keep all the data
                 keep_indices.append((i, len_line))
-            sink.write(" ".join(line)+'\n')
+            sink.write(" ".join(line) + "\n")
     with open(os.path.join(save_path, "temp_trg.txt"), "w") as sink:
         total_length = sum(1 for _ in open(trg_file, "r"))
         for i in range(total_length):
@@ -109,7 +110,7 @@ def prep_trans_files(
             line, len_line = clean_and_tok(line, trg_tok)
             if max_len or min_len:
                 y.append((i, len_line))
-            sink.write(" ".join(line)+'\n')
+            sink.write(" ".join(line) + "\n")
     assert len(X) == len(y)
     print(f"Total number of examples {len(X)}")
     if max_len or min_len:
@@ -171,23 +172,36 @@ def main(args):
         "ru": Russian(),
         "fr": spacy.load("fr_core_news_sm"),
         "es": spacy.load("es_core_news_sm"),
+        "ar": WordTokenizer("arabic"),
     }
 
     src_tokenizer = None
     if args.src_tok is not None:
-        spacy_src = tokenizers[args.src_tok]
+        src_tok = tokenizers[args.src_tok]
+        if args.src_tok == "ar":
 
-        def tokenize_src(text):
-            return [tok.text for tok in spacy_src.tokenizer(text)]
+            def tokenize_src(text):
+                return [tok for tok in src_tok.tokenize(text)]
+
+        else:
+
+            def tokenize_src(text):
+                return [tok.text for tok in src_tok.tokenizer(text)]
 
         src_tokenizer = tokenize_src
 
     trg_tokenizer = None
     if args.trg_tok is not None:
-        spacy_trg = tokenizers[args.trg_tok]
+        trg_tok = tokenizers[args.trg_tok]
+        if args.trg_tok == "ar":
 
-        def tokenize_trg(text):
-            return [tok.text for tok in spacy_trg.tokenizer(text)]
+            def tokenize_trg(text):
+                return [tok for tok in trg_tok.tokenize(text)]
+
+        else:
+
+            def tokenize_trg(text):
+                return [tok.text for tok in tokz.tokenizer(text)]
 
         trg_tokenizer = tokenize_trg
 
@@ -245,15 +259,15 @@ if __name__ == "__main__":
         "--src-tok",
         default=None,
         type=str,
-        choices=["en", "es", "fr", "ru", "zh"],
-        help="source language tokenizer. options are en, es, fr, ru, or zh",
+        choices=["ar", "en", "es", "fr", "ru", "zh"],
+        help="source language tokenizer. options are ar, en, es, fr, ru, or zh",
     )
     parser.add_argument(
         "--trg-tok",
         default=None,
         type=str,
-        choices=["en", "es", "fr", "ru", "zh"],
-        help="target language tokenizer. options are en, es, fr, ru, or zh",
+        choices=["ar", "en", "es", "fr", "ru", "zh"],
+        help="target language tokenizer. options are ar, en, es, fr, ru, or zh",
     )
     parser.add_argument(
         "--no-sort",

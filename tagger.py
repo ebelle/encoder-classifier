@@ -26,17 +26,14 @@ class Encoder(nn.Module):
         self.enc_embedding = nn.Embedding(
             input_dim, emb_dim, padding_idx=pad_idx, sparse=True
         )
-        
-        if self.repr_layer == 'rnn1':
+
+        if self.repr_layer == "rnn1":
             #  LSTM
             self.rnn = nn.LSTM(
-                emb_dim,
-                enc_hid_dim,
-                num_layers=1,
-                bidirectional=bidirectional,
+                emb_dim, enc_hid_dim, num_layers=1, bidirectional=bidirectional,
             )
 
-        elif self.repr_layer == 'whole_encoder':
+        elif self.repr_layer == "whole_encoder":
             #  LSTM
             self.rnn = nn.LSTM(
                 emb_dim,
@@ -52,7 +49,7 @@ class Encoder(nn.Module):
         # Convert input_sequence to embeddings
         x = self.dropout(self.enc_embedding(x))
 
-        if self.repr_layer != 'embedding':
+        if self.repr_layer != "embedding":
             # Pack the sequence of embeddings
             x = nn.utils.rnn.pack_padded_sequence(x, input_lengths)
 
@@ -69,7 +66,7 @@ class Encoder(nn.Module):
             # and reverse
             if self.bidirectional:
                 # outputs = [src len, batch size, hid dim]
-                x = x[:, :, :self.enc_hid_dim] + x[:, :, self.enc_hid_dim:]
+                x = x[:, :, : self.enc_hid_dim] + x[:, :, self.enc_hid_dim :]
 
             # hidden = [n layers * num directions, batch size, hid dim]
         return x
@@ -92,7 +89,7 @@ class Decoder(nn.Module):
 
         self.dec_layers = dec_layers
         self.dropout = nn.Dropout(dec_dropout)
-        if repr_layer == 'embedding':
+        if repr_layer == "embedding":
             self.hidden_layer1 = nn.Linear(emb_dim, dec_hid_dim)
         else:
             self.hidden_layer1 = nn.Linear(enc_hid_dim, dec_hid_dim)

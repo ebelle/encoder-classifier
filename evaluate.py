@@ -29,13 +29,21 @@ def valid_step(
 
 
 def evaluate_model(
-    model, iterator, task, optimizer, criterion, device,pad_indices,num_batches, teacher_forcing=None
+    model,
+    iterator,
+    task,
+    optimizer,
+    criterion,
+    device,
+    pad_indices,
+    num_batches,
+    teacher_forcing=None,
 ):
 
     model.eval()
     epoch_loss = 0
     for batch in iterator:
-        source, targets, src_len = prep_batch(batch, device,pad_indices)
+        source, targets, src_len = prep_batch(batch, device, pad_indices)
         optimizer.zero_grad()
         loss = valid_step(
             model, source, src_len, targets, task, criterion, teacher_forcing

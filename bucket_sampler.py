@@ -35,7 +35,7 @@ class BucketBatchSampler(Sampler):
         for group in [
             ordered_indices[i : (i + self.batch_size)]
             for i in range(0, len(ordered_indices), self.batch_size)
-            ]:
+        ]:
             batch_list.append(group)
 
         return batch_list

@@ -151,7 +151,6 @@ class Seq2Seq(nn.Module):
         src_pad_idx,
         device,
         new_state_dict=None,
-
     ):
         super().__init__()
 

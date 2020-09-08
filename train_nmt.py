@@ -106,7 +106,7 @@ def main(args):
         best_valid_loss = float("inf")
 
     else:
-        model_dict = torch.load(args.continue_model,map_location=torch.device('cpu'))
+        model_dict = torch.load(args.continue_model, map_location=torch.device("cpu"))
         prev_state_dict = model_dict["model_state_dict"]
         prev_param_dict = get_prev_params(prev_state_dict)
         dropout = model_dict["dropout"]
@@ -165,7 +165,7 @@ def main(args):
             start_time=start_time,
             save_path=args.save_path,
             dropout=args.dropout,
-            pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
+            pad_indices=(SRC_PAD_IDX, TRG_PAD_IDX),
             teacher_forcing=args.teacher_forcing,
             checkpoint=args.checkpoint,
             num_batches=num_batches,
@@ -187,7 +187,7 @@ def main(args):
             },
             model_filename,
         )
-        
+
         # optionally validate
         if not args.skip_validate:
 
@@ -195,7 +195,7 @@ def main(args):
             valid_set = LazyDataset(valid_path, SRC, TRG, "translation")
             valid_batch_sampler = BucketBatchSampler(valid_path, args.batch_size)
             num_batches = valid_batch_sampler.num_batches
-            
+
             valid_loader_params = {
                 # since bucket sampler returns batch, batch_size is 1
                 "batch_size": 1,
@@ -220,7 +220,7 @@ def main(args):
                 criterion=criterion,
                 teacher_forcing=args.teacher_forcing,
                 device=device,
-                pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
+                pad_indices=(SRC_PAD_IDX, TRG_PAD_IDX),
             )
 
             if valid_loss < best_valid_loss:

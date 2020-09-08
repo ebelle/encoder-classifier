@@ -17,7 +17,6 @@ from queue import PriorityQueue
 import functools
 
 
-
 def preds_to_toks(preds, vocab_field, min_len=5):
 
     preds = [[vocab_field.vocab.itos[i] for i in x] for x in preds]
@@ -198,6 +197,7 @@ def beam_decode(source, src_len, trg_vocab, model, device, beam_width=5):
             decoded_batch.append(preds[0])
     return decoded_batch
 
+
 def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
 
     model.eval()
@@ -237,6 +237,7 @@ def greedy_decode(source, src_len, trg_vocab, model, device, max_len=55):
             decoded_batch[:, t] = decoder_input.cpu()
 
     return decoded_batch
+
 
 def main(args):
 
@@ -302,7 +303,9 @@ def main(args):
     final_preds = []
     final_targets = []
     for i, batch in enumerate(test_iterator):
-        source, target_indicies, src_len = prep_eval_batch(batch, device,TRG.vocab.stoi[TRG.pad_token])
+        source, target_indicies, src_len = prep_eval_batch(
+            batch, device, TRG.vocab.stoi[TRG.pad_token]
+        )
         # get targets from file
         final_targets += [get_target(test_path, idx) for idx in target_indicies]
 
@@ -317,7 +320,7 @@ def main(args):
             preds = preds.numpy().astype(int)
             final_preds += preds_to_toks(preds, TRG)
 
-        if i % int(len(test_iterator)/100) == 0:
+        if i % int(len(test_iterator) / 100) == 0:
             end_time = time.time()
             epoch_mins, epoch_secs = epoch_time(start_time, end_time)
             print(f" batch {i} |Time: {epoch_mins}m {epoch_secs}s")
@@ -350,10 +353,7 @@ if __name__ == "__main__":
         help="decoder method. choices are beam or greedy",
     )
     parser.add_argument(
-        "--no-bleu",
-        default=False,
-        action='store_true',
-        help="do not compute BLEU",
+        "--no-bleu", default=False, action="store_true", help="do not compute BLEU",
     )
     parser.add_argument(
         "--save-file",

@@ -38,7 +38,7 @@ def make_encoder_dict(prev_state_dict):
     return new_state_dict
 
 
-def make_loss_plot(model_history,save_path,epochs):
+def make_loss_plot(model_history, save_path, epochs):
     fig, ax = plt.subplots()
     # Hide the right and top spines
     ax.spines["right"].set_visible(False)
@@ -49,11 +49,12 @@ def make_loss_plot(model_history,save_path,epochs):
     plt.xlabel("epochs", fontsize=14)
     plt.ylabel("training loss", fontsize=14)
     ax.set_title("Training Loss", fontsize=14)
-    epoch_list = [i for i in [i+1 for i in range(epochs)] if i % 10 == 0]
-    spacing = [i*9 for i in epoch_list ]
-    plt.xticks(spacing,labels=epoch_list)
+    epoch_list = [i for i in [i + 1 for i in range(epochs)] if i % 10 == 0]
+    spacing = [i * 9 for i in epoch_list]
+    plt.xticks(spacing, labels=epoch_list)
     plt.legend()
-    fig.savefig(os.path.join(save_path,'loss_plt.png'))
+    fig.savefig(os.path.join(save_path, "loss_plt.png"))
+
 
 def main(args):
 
@@ -96,7 +97,9 @@ def main(args):
     train_iterator = torch.utils.data.DataLoader(training_set, **train_loader_params)
 
     # load pretrained-model
-    prev_state_dict = torch.load(args.pretrained_model,map_location=torch.device('cpu'))
+    prev_state_dict = torch.load(
+        args.pretrained_model, map_location=torch.device("cpu")
+    )
     enc_dropout = prev_state_dict["dropout"]
     prev_state_dict = prev_state_dict["model_state_dict"]
 
@@ -105,23 +108,22 @@ def main(args):
 
     new_state_dict = make_encoder_dict(prev_state_dict)
 
-    if args.repr_layer == 'embedding':
+    if args.repr_layer == "embedding":
         new_dict = {}
         # add embedding layer
-        new_dict['enc_embedding.weight'] = new_state_dict['enc_embedding.weight']
+        new_dict["enc_embedding.weight"] = new_state_dict["enc_embedding.weight"]
         # replace state dict with new dict
         new_state_dict = new_dict
-    elif args.repr_layer == 'rnn1':
+    elif args.repr_layer == "rnn1":
         new_dict = {}
         # add embedding layer
-        new_dict['enc_embedding.weight'] = new_state_dict['enc_embedding.weight']
-        # add first layer weights and bias 
-        for k,v in new_state_dict.items():
+        new_dict["enc_embedding.weight"] = new_state_dict["enc_embedding.weight"]
+        # add first layer weights and bias
+        for k, v in new_state_dict.items():
             if "l0" in k:
                 new_dict[k] = v
         # replace state dict with new dict
         new_state_dict = new_dict
-
 
     model = Tagger(
         new_state_dict=new_state_dict,
@@ -136,7 +138,7 @@ def main(args):
         dec_dropout=args.dropout,
         bidirectional=prev_param_dict["bidirectional"],
         pad_idx=pad_idx,
-        repr_layer = args.repr_layer,
+        repr_layer=args.repr_layer,
     ).to(device)
 
     # optionally randomly initialize weights
@@ -153,7 +155,7 @@ def main(args):
             param.requires_grad = False
 
     SRC_PAD_IDX = SRC.vocab.stoi[SRC.pad_token]
-    TRG_PAD_IDX = len(TRG.vocab)+1
+    TRG_PAD_IDX = len(TRG.vocab) + 1
     criterion = nn.CrossEntropyLoss(ignore_index=TRG_PAD_IDX)
 
     best_valid_loss = float("inf")
@@ -174,11 +176,11 @@ def main(args):
             epoch=epoch,
             start_time=start_time,
             save_path=args.save_path,
-            pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
+            pad_indices=(SRC_PAD_IDX, TRG_PAD_IDX),
             dropout=(enc_dropout, args.dropout),
             checkpoint=args.checkpoint,
             repr_layer=args.repr_layer,
-            num_batches = num_batches
+            num_batches=num_batches,
         )
         batch_history += batch_loss
         epoch_history.append(train_loss)
@@ -233,7 +235,7 @@ def main(args):
                 criterion=criterion,
                 task="tagging",
                 device=device,
-                pad_indices=(SRC_PAD_IDX,TRG_PAD_IDX),
+                pad_indices=(SRC_PAD_IDX, TRG_PAD_IDX),
             )
 
             if valid_loss < best_valid_loss:
@@ -268,8 +270,7 @@ def main(args):
             )
 
     if args.loss_plot:
-        make_loss_plot(batch_history,args.save_path,args.epochs)
-
+        make_loss_plot(batch_history, args.save_path, args.epochs)
 
 
 if __name__ == "__main__":
@@ -334,5 +335,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--loss-plot", default=False, action="store_true", help="create a loss plot"
     )
-    parser.add_argument("--only-best", default=False,action="store_true",help="only save the best model")
+    parser.add_argument(
+        "--only-best",
+        default=False,
+        action="store_true",
+        help="only save the best model",
+    )
     main(parser.parse_args())
