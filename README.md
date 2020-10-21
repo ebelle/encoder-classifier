@@ -62,7 +62,7 @@ python train_nmt.py --data-path /data/translation/en_ru \
 --continue-training-model checkpoints/en_ru/checkpoint_2_40000 \
 --freeze-embeddings
 
-# Example usage of training tagger \
+# Example usage of training tagger:
 python train_tagger.py \
 --data-path data/classification_data \
 --nmt-data-path data/translation/en_ru/ \
@@ -72,7 +72,7 @@ python train_tagger.py \
 --dropout 0.3  \
 --epochs 30 
 
-# Example usage of generating tags \
+# Example usage of generating tags:
 python generate_tagger.py \
 --data-path data/classification_data \
 --pretrained-model checkpoints/pos_en_ru/best_model.pt \
